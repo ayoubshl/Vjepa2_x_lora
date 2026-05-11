@@ -32,10 +32,13 @@ def build_optimizer(model, probe, config):
     n_trainable = sum(p.numel() for p in params)
     print(f"Trainable parameters: {n_trainable / 1e6:.2f}M")
 
+    lr = float(config['lr'])
+    weight_decay = float(config.get('weight_decay', 0.05))
+
     optimizer = torch.optim.AdamW(
         params,
-        lr=config['lr'],
-        weight_decay=config.get('weight_decay', 0.05)
+        lr=lr,
+        weight_decay=weight_decay
     )
 
     return optimizer, params
@@ -57,8 +60,8 @@ def build_scheduler(optimizer, config, steps_per_epoch, num_participants):
     Returns:
         scheduler: LambdaLR instance
     """
-    epochs_per_participant = config['epochs_per_participant']
-    warmup_steps = config.get('warmup_steps', 500)
+    epochs_per_participant = int(config['epochs_per_participant'])
+    warmup_steps = int(config.get('warmup_steps', 500))
     total_steps = steps_per_epoch * epochs_per_participant * num_participants
 
     print(f"Scheduler: {warmup_steps} warmup → cosine decay "

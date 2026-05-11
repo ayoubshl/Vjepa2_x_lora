@@ -68,7 +68,7 @@ class PipelineManager:
         self.scheduler = PipelineScheduler(
             train_csv=self.train_csv,
             state_path=state_path,
-            max_on_disk=pipeline.get('max_participants_on_disk', 3)
+            max_on_disk=int(pipeline.get('max_participants_on_disk', 3))
         )
 
     def run(self):

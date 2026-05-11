@@ -75,12 +75,12 @@ def build_probe(feature_dim, num_action_classes,
 
     probe = AttentiveProbe(
         input_dim=feature_dim,
-        num_verb_classes=num_verb_classes,
-        num_noun_classes=num_noun_classes,
-        num_action_classes=num_action_classes,
-        num_heads=num_heads,
-        num_layers=num_layers,
-        dropout=dropout
+        num_verb_classes=int(num_verb_classes),
+        num_noun_classes=int(num_noun_classes),
+        num_action_classes=int(num_action_classes),
+        num_heads=int(num_heads),
+        num_layers=int(num_layers),
+        dropout=float(dropout)
     )
 
     n_params = sum(p.numel() for p in probe.parameters())

@@ -77,11 +77,11 @@ def _initialize(global_config, experiment_config, action_to_id,
     probe = build_probe(
         feature_dim=feature_dim,
         num_action_classes=num_actions,
-        num_verb_classes=dataset_cfg['num_verb_classes'],
-        num_noun_classes=dataset_cfg['num_noun_classes'],
-        num_layers=experiment_config.get('probe_layers', 2),
-        num_heads=experiment_config.get('probe_heads', 8),
-        dropout=experiment_config.get('probe_dropout', 0.1),
+        num_verb_classes=int(dataset_cfg['num_verb_classes']),
+        num_noun_classes=int(dataset_cfg['num_noun_classes']),
+        num_layers=int(experiment_config.get('probe_layers', 2)),
+        num_heads=int(experiment_config.get('probe_heads', 8)),
+        dropout=float(experiment_config.get('probe_dropout', 0.1)),
     ).to(device)
 
     # Build optimizer
@@ -99,7 +99,8 @@ def _initialize(global_config, experiment_config, action_to_id,
     num_participants = scheduler_obj.get_num_participants()
 
     # Rough estimate: ~1000 clips per participant, / batch_size
-    estimated_steps_per_epoch = 1000 // experiment_config['batch_size']
+    batch_size = int(experiment_config['batch_size'])
+    estimated_steps_per_epoch = 1000 // batch_size
     scheduler = build_scheduler(
         optimizer, experiment_config,
         estimated_steps_per_epoch, num_participants
@@ -188,10 +189,14 @@ def train_on_participant(participant_id, global_config,
     monitor = _cached_monitor
     processor = _cached_processor
 
-    epochs = experiment_config['epochs_per_participant']
-    eval_every = experiment_config.get('eval_every_n_epochs', 1)
-    max_grad_norm = experiment_config.get('max_grad_norm', 1.0)
-    use_bf16 = experiment_config.get('use_bf16', True)
+    epochs = int(experiment_config['epochs_per_participant'])
+    eval_every = int(experiment_config.get('eval_every_n_epochs', 1))
+    max_grad_norm = float(experiment_config.get('max_grad_norm', 1.0))
+    use_bf16 = bool(experiment_config.get('use_bf16', True))
+    batch_size = int(experiment_config['batch_size'])
+    fps = int(dataset_cfg['fps'])
+    anticipation_s = float(dataset_cfg['anticipation_seconds'])
+    num_frames = int(dataset_cfg['num_frames'])
 
     checkpoints_dir = os.path.expanduser(
         os.path.join(paths['checkpoints_dir'],
@@ -205,10 +210,10 @@ def train_on_participant(participant_id, global_config,
         action_to_id=action_to_id,
         participants=[participant_id],
         processor=processor,
-        batch_size=experiment_config['batch_size'],
-        fps=dataset_cfg['fps'],
-        anticipation_s=dataset_cfg['anticipation_seconds'],
-        num_frames=dataset_cfg['num_frames'],
+        batch_size=batch_size,
+        fps=fps,
+        anticipation_s=anticipation_s,
+        num_frames=num_frames,
         split='train',
     )
 
@@ -225,10 +230,10 @@ def train_on_participant(participant_id, global_config,
         action_to_id=action_to_id,
         participants=val_participants if val_participants else None,
         processor=processor,
-        batch_size=experiment_config['batch_size'],
-        fps=dataset_cfg['fps'],
-        anticipation_s=dataset_cfg['anticipation_seconds'],
-        num_frames=dataset_cfg['num_frames'],
+        batch_size=batch_size,
+        fps=fps,
+        anticipation_s=anticipation_s,
+        num_frames=num_frames,
         split='validation',
     )
 
@@ -385,7 +390,7 @@ def train_on_participant(participant_id, global_config,
     )
 
     print(f"\n{participant_id} training complete "
-          f"({experiment_config['epochs_per_participant']} epochs)")
+          f"({epochs} epochs)")
 
 
 # Import here to avoid circular imports

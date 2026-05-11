@@ -195,9 +195,9 @@ def build_dataloader(csv_path, frames_dir, action_to_id,
         action_to_id=action_to_id,
         participants=participants,
         processor=processor,
-        fps=fps,
-        anticipation_s=anticipation_s,
-        num_frames=num_frames,
+        fps=int(fps),
+        anticipation_s=float(anticipation_s),
+        num_frames=int(num_frames),
         split=split
     )
 
@@ -206,9 +206,9 @@ def build_dataloader(csv_path, frames_dir, action_to_id,
 
     loader = DataLoader(
         dataset,
-        batch_size=batch_size,
+        batch_size=int(batch_size),
         shuffle=shuffle,
-        num_workers=num_workers,
+        num_workers=int(num_workers),
         pin_memory=True
     )
 

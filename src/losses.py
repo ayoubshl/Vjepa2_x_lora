@@ -75,9 +75,9 @@ def build_loss(config):
         MultiHeadLoss instance
     """
     loss = MultiHeadLoss(
-        w_verb=config.get('w_verb', 1.0),
-        w_noun=config.get('w_noun', 1.0),
-        w_action=config.get('w_action', 1.0),
+        w_verb=float(config.get('w_verb', 1.0)),
+        w_noun=float(config.get('w_noun', 1.0)),
+        w_action=float(config.get('w_action', 1.0)),
     )
 
     print(f"Loss weights: verb={loss.w_verb}, "

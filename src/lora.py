@@ -22,15 +22,15 @@ def apply_lora(model, config):
     Returns:
         model with LoRA applied to encoder
     """
-    lora_r = config['lora_r']
-    lora_alpha = config.get('lora_alpha', lora_r * 2)
-    lora_dropout = config.get('lora_dropout', 0.1)
+    lora_r = int(config['lora_r'])
+    lora_alpha = int(config.get('lora_alpha', lora_r * 2))
+    lora_dropout = float(config.get('lora_dropout', 0.1))
     target_modules = config.get('lora_target_modules', ['query', 'value'])
 
     # Upper layers only mode
     upper_only = config.get('lora_upper_layers_only', False)
     if upper_only:
-        num_upper = config.get('lora_num_upper_layers', 6)
+        num_upper = int(config.get('lora_num_upper_layers', 6))
         total_layers = model.config.num_hidden_layers
         start_layer = total_layers - num_upper
 
