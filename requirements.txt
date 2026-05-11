@@ -1,0 +1,15 @@
+torch==2.6.0
+torchvision
+torchaudio
+transformers @ git+https://github.com/huggingface/transformers
+peft>=0.18.0
+accelerate
+wandb
+tqdm
+pandas
+numpy
+pillow
+pyyaml
+gitpython
+psutil
+bitsandbytes

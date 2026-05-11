@@ -1,0 +1,37 @@
+# ============================================================
+# LoRA applied only to upper transformer layers
+# Tests if adapting only the last N layers is enough
+# ============================================================
+
+experiment_name: lora_upper_layers
+
+# Model
+use_lora: true
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.1
+lora_target_modules: ["query", "value"]
+lora_upper_layers_only: true
+lora_num_upper_layers: 6
+
+# Probe
+probe_layers: 2
+probe_heads: 8
+probe_dropout: 0.1
+
+# Training
+batch_size: 4
+lr: 5e-5
+weight_decay: 0.05
+epochs_per_participant: 3
+warmup_steps: 500
+max_grad_norm: 1.0
+use_bf16: true
+
+# Loss weights
+w_verb: 1.0
+w_noun: 1.0
+w_action: 1.0
+
+# Evaluation
+eval_every_n_epochs: 1

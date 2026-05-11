@@ -1,0 +1,30 @@
+# ============================================================
+# Baseline: frozen V-JEPA 2 encoder + 3-head probe
+# ============================================================
+
+experiment_name: baseline_frozen
+
+# Model
+use_lora: false
+
+# Probe
+probe_layers: 2
+probe_heads: 8
+probe_dropout: 0.1
+
+# Training
+batch_size: 8
+lr: 1e-4
+weight_decay: 0.05
+epochs_per_participant: 3
+warmup_steps: 500
+max_grad_norm: 1.0
+use_bf16: true
+
+# Loss weights
+w_verb: 1.0
+w_noun: 1.0
+w_action: 1.0
+
+# Evaluation
+eval_every_n_epochs: 1

@@ -1,0 +1,50 @@
+# Frames (too large for git)
+frames/
+!frames/.gitkeep
+
+# Checkpoints (too large for git)
+checkpoints/
+!checkpoints/.gitkeep
+
+# Results (pushed separately by the pipeline)
+results/
+!results/.gitkeep
+
+# Downloaded data
+download/data/
+download/*.tar
+!download/.gitkeep
+
+# Annotations (large CSVs placed manually on server)
+annotations/
+!annotations/.gitkeep
+
+# Pipeline state
+pipeline_state.json
+vocabulary.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Conda / venv
+.conda/
+venv/
+env/
+
+# wandb
+wandb/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

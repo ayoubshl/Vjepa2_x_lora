@@ -1,0 +1,38 @@
+# ============================================================
+# Global config — shared across all experiments
+# ============================================================
+
+# Paths 
+paths:
+  project_dir: ~/Vjepa2_x_lora
+  frames_dir: ~/Vjepa2_x_lora/frames
+  annotations_dir: ~/Vjepa2_x_lora/annotations
+  train_csv: ~/Vjepa2_x_lora/annotations/EPIC_100_train.csv
+  val_csv: ~/Vjepa2_x_lora/annotations/EPIC_100_validation.csv
+  checkpoints_dir: ~/Vjepa2_x_lora/checkpoints
+  results_dir: ~/Vjepa2_x_lora/results
+  vocabulary_path: ~/Vjepa2_x_lora/vocabulary.json
+  downloader_dir: ~/Vjepa2_x_lora/download
+
+# V-JEPA 2 model from HuggingFace
+# hidden_size and pred_hidden_size are read from model.config at runtime
+model:
+  hf_repo: facebook/vjepa2-vitl-fpc64-256
+
+# EK-100 constants
+dataset:
+  fps: 60
+  anticipation_seconds: 1.0
+  num_frames: 64
+  num_verb_classes: 97
+  num_noun_classes: 300
+
+# Pipeline settings
+pipeline:
+  max_participants_on_disk: 3
+  device: cuda:0
+
+# wandb
+wandb:
+  project: vjepa2-x-lora
+  entity: null
