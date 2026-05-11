@@ -9,6 +9,7 @@ Model, optimizer, scheduler carry over between participants.
 import os
 import time
 import torch
+import pandas as pd
 from tqdm import tqdm
 
 from src.model import load_model, extract_features, get_feature_dim
@@ -38,6 +39,12 @@ _cached_history = {}
 _cached_participants_trained = []
 _cached_total_train_time = 0.0
 _cached_initialized = False
+
+
+def _count_participants(train_csv):
+    """Counts unique training participants without touching pipeline state."""
+    df = pd.read_csv(train_csv, usecols=['participant_id'])
+    return df['participant_id'].nunique()
 
 
 def _initialize(global_config, experiment_config, action_to_id,
@@ -92,11 +99,9 @@ def _initialize(global_config, experiment_config, action_to_id,
     # Estimate scheduler steps
     # We use a rough estimate here — exact count comes from dataloader
     # but we need the scheduler before building the first dataloader
-    scheduler_obj = PipelineScheduler(
-        train_csv=os.path.expanduser(paths['train_csv']),
-        state_path='/dev/null',  # throwaway, just to count participants
+    num_participants = _count_participants(
+        os.path.expanduser(paths['train_csv'])
     )
-    num_participants = scheduler_obj.get_num_participants()
 
     # Rough estimate: ~1000 clips per participant, / batch_size
     batch_size = int(experiment_config['batch_size'])
@@ -380,18 +385,11 @@ def train_on_participant(participant_id, global_config,
         results=results,
         best_action_r5=_cached_best_action_r5,
         participants_done=len(_cached_participants_trained),
-        total_participants=len(
-            PipelineScheduler(
-                train_csv=os.path.expanduser(paths['train_csv']),
-                state_path='/dev/null',
-            ).all_participants
+        total_participants=_count_participants(
+            os.path.expanduser(paths['train_csv'])
         ),
         global_step=_cached_global_step,
     )
 
     print(f"\n{participant_id} training complete "
           f"({epochs} epochs)")
-
-
-# Import here to avoid circular imports
-from pipeline.scheduler import PipelineScheduler
