@@ -9,6 +9,7 @@ so it works regardless of how many participants exist.
 
 import os
 import json
+from json import JSONDecodeError
 import pandas as pd
 
 
@@ -44,8 +45,26 @@ class PipelineScheduler:
     def _load_state(self):
         """Loads state from JSON or creates fresh state."""
         if os.path.exists(self.state_path):
-            with open(self.state_path, 'r') as f:
-                state = json.load(f)
+            if os.path.getsize(self.state_path) == 0:
+                print(f"Empty pipeline state at {self.state_path}; "
+                      "starting fresh")
+                state = {
+                    'trained': [],
+                    'current': None,
+                    'on_disk': [],
+                }
+                self._save_state(state)
+                return state
+
+            try:
+                with open(self.state_path, 'r') as f:
+                    state = json.load(f)
+            except JSONDecodeError as e:
+                raise ValueError(
+                    f"Invalid pipeline state JSON at {self.state_path}. "
+                    "Delete or repair this file before resuming."
+                ) from e
+
             print(f"Pipeline state loaded from {self.state_path}")
             print(f"  trained: {state['trained']}")
             print(f"  current: {state['current']}")
