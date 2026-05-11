@@ -71,12 +71,17 @@ class EK100Dataset(Dataset):
             print(f"[{split}] Skipped {n_skipped} clips "
                   f"with missing frame folders")
 
+        if len(df) == 0:
+            self.annotations = df.assign(action_class=pd.Series(dtype='int64'))
+            p_str = participants if participants else 'all'
+            print(f"[{split}] Loaded 0 clips | participants: {p_str}")
+            return
+
         # Map (verb, noun) -> action_class
-        df['action_class'] = df.apply(
-            lambda row: get_action_id(
-                row['verb_class'], row['noun_class'], action_to_id
-            ), axis=1
-        )
+        df['action_class'] = [
+            get_action_id(row.verb_class, row.noun_class, action_to_id)
+            for row in df.itertuples(index=False)
+        ]
 
         n_unknown = (df['action_class'] == -1).sum()
         if n_unknown > 0:
@@ -203,6 +208,13 @@ def build_dataloader(csv_path, frames_dir, action_to_id,
 
     if shuffle is None:
         shuffle = (split == 'train')
+
+    if len(dataset) == 0:
+        raise ValueError(
+            f"[{split}] No valid clips found for participants={participants}. "
+            f"Check that frames_dir contains participant/video folders: "
+            f"{frames_dir}"
+        )
 
     loader = DataLoader(
         dataset,

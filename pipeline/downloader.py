@@ -111,15 +111,18 @@ class FrameDownloader:
 
         for tar_name in tar_files:
             tar_path = os.path.join(download_path, tar_name)
+            video_id = tar_name.replace('.tar', '')
+            video_frames = os.path.join(participant_frames, video_id)
+            os.makedirs(video_frames, exist_ok=True)
 
             try:
-                # Extract
+                # Extract each video archive into the folder expected by
+                # EK100Dataset: frames/PXX/PXX_YY/*.jpg
                 with tarfile.open(tar_path, 'r') as tar:
-                    tar.extractall(path=participant_frames)
+                    tar.extractall(path=video_frames)
 
                 # Delete tar immediately
                 os.remove(tar_path)
-                video_id = tar_name.replace('.tar', '')
                 print(f"  extracted + deleted: {tar_name}")
 
             except Exception as e:
@@ -180,6 +183,9 @@ class FrameDownloader:
         if not os.path.exists(participant_dir):
             return False
 
-        # Check it has at least one video subfolder
-        contents = os.listdir(participant_dir)
-        return len(contents) > 0
+        # Check it has at least one non-empty video subfolder.
+        for name in os.listdir(participant_dir):
+            video_dir = os.path.join(participant_dir, name)
+            if os.path.isdir(video_dir) and os.listdir(video_dir):
+                return True
+        return False
