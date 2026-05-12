@@ -1,13 +1,16 @@
-
 """
 Per-participant training loop.
 
 Trains for N epochs on one participant's data.
 Model, optimizer, scheduler carry over between participants.
+
+Uses thread-local storage so parallel threads on different GPUs
+each have their own independent model, optimizer, and state.
 """
 
 import os
 import time
+import threading
 import torch
 import pandas as pd
 from tqdm import tqdm
@@ -25,20 +28,13 @@ from src.vocabulary import load_action_vocabulary
 from src import logger
 
 
-# Module-level cache so we don't reload the model every participant
-_cached_model = None
-_cached_probe = None
-_cached_optimizer = None
-_cached_scheduler = None
-_cached_loss_fn = None
-_cached_monitor = None
-_cached_processor = None
-_cached_global_step = 0
-_cached_best_action_r5 = 0.0
-_cached_history = {}
-_cached_participants_trained = []
-_cached_total_train_time = 0.0
-_cached_initialized = False
+# Thread-local storage — each thread gets its own model, probe, etc.
+_local = threading.local()
+
+
+def _is_initialized():
+    """Check if this thread has been initialized."""
+    return getattr(_local, 'initialized', False)
 
 
 def _count_participants(train_csv):
@@ -52,16 +48,9 @@ def _initialize(global_config, experiment_config, action_to_id,
     """
     One-time initialization: loads model, builds probe, optimizer,
     scheduler, loss, and restores from checkpoint if available.
-    Called once on the first participant, then cached.
+    Called once per thread on the first participant, then cached.
     """
-    global _cached_model, _cached_probe, _cached_optimizer
-    global _cached_scheduler, _cached_loss_fn, _cached_monitor
-    global _cached_processor, _cached_global_step
-    global _cached_best_action_r5, _cached_history
-    global _cached_participants_trained, _cached_total_train_time
-    global _cached_initialized
-
-    if _cached_initialized:
+    if _is_initialized():
         return
 
     paths = global_config['paths']
@@ -72,7 +61,7 @@ def _initialize(global_config, experiment_config, action_to_id,
     # Initialize wandb
     logger.init_wandb(global_config, experiment_config)
 
-    # Load model
+    # Load model — each thread loads its own independent copy
     hf_repo = global_config['model']['hf_repo']
     model, processor = load_model(hf_repo, device)
 
@@ -97,8 +86,6 @@ def _initialize(global_config, experiment_config, action_to_id,
     )
 
     # Estimate scheduler steps
-    # We use a rough estimate here — exact count comes from dataloader
-    # but we need the scheduler before building the first dataloader
     num_participants = _count_participants(
         os.path.expanduser(paths['train_csv'])
     )
@@ -139,20 +126,20 @@ def _initialize(global_config, experiment_config, action_to_id,
         participants_trained = ckpt_info['participants_trained']
         total_train_time = ckpt_info['total_train_time']
 
-    # Cache everything
-    _cached_model = model
-    _cached_probe = probe
-    _cached_optimizer = optimizer
-    _cached_scheduler = scheduler
-    _cached_loss_fn = loss_fn
-    _cached_monitor = monitor
-    _cached_processor = processor
-    _cached_global_step = global_step
-    _cached_best_action_r5 = best_action_r5
-    _cached_history = history
-    _cached_participants_trained = participants_trained
-    _cached_total_train_time = total_train_time
-    _cached_initialized = True
+    # Cache in thread-local storage
+    _local.model = model
+    _local.probe = probe
+    _local.optimizer = optimizer
+    _local.scheduler = scheduler
+    _local.loss_fn = loss_fn
+    _local.monitor = monitor
+    _local.processor = processor
+    _local.global_step = global_step
+    _local.best_action_r5 = best_action_r5
+    _local.history = history
+    _local.participants_trained = participants_trained
+    _local.total_train_time = total_train_time
+    _local.initialized = True
 
     print("\nInitialization complete")
 
@@ -173,11 +160,7 @@ def train_on_participant(participant_id, global_config,
         action_to_id:       vocabulary dict
         num_actions:        number of action classes
     """
-    global _cached_global_step, _cached_best_action_r5
-    global _cached_history, _cached_participants_trained
-    global _cached_total_train_time
-
-    # Initialize on first call
+    # Initialize on first call (per thread)
     _initialize(global_config, experiment_config, action_to_id,
                 num_actions)
 
@@ -186,13 +169,13 @@ def train_on_participant(participant_id, global_config,
     dataset_cfg = global_config['dataset']
     device = torch.device(pipeline['device'])
 
-    model = _cached_model
-    probe = _cached_probe
-    optimizer = _cached_optimizer
-    scheduler = _cached_scheduler
-    loss_fn = _cached_loss_fn
-    monitor = _cached_monitor
-    processor = _cached_processor
+    model = _local.model
+    probe = _local.probe
+    optimizer = _local.optimizer
+    scheduler = _local.scheduler
+    loss_fn = _local.loss_fn
+    monitor = _local.monitor
+    processor = _local.processor
 
     epochs = int(experiment_config['epochs_per_participant'])
     eval_every = int(experiment_config.get('eval_every_n_epochs', 1))
@@ -250,8 +233,8 @@ def train_on_participant(participant_id, global_config,
     scaler = torch.amp.GradScaler('cuda', enabled=use_bf16)
 
     # Initialize history for this participant
-    if participant_id not in _cached_history:
-        _cached_history[participant_id] = {}
+    if participant_id not in _local.history:
+        _local.history[participant_id] = {}
 
     participant_start_time = time.time()
 
@@ -302,10 +285,10 @@ def train_on_participant(participant_id, global_config,
             )
 
             # Logging
-            _cached_global_step += 1
+            _local.global_step += 1
             current_lr = scheduler.get_last_lr()[0]
             logger.log_step(loss_dict, current_lr,
-                           _cached_global_step, collapse_metrics)
+                           _local.global_step, collapse_metrics)
 
             epoch_loss += loss_dict['total_loss']
             epoch_verb_loss += loss_dict['verb_loss']
@@ -322,7 +305,7 @@ def train_on_participant(participant_id, global_config,
         avg_action = epoch_action_loss / max(1, num_batches)
 
         logger.log_epoch(participant_id, epoch, avg_loss,
-                        _cached_global_step)
+                        _local.global_step)
 
         print(f"{participant_id} epoch {epoch} — "
               f"avg loss: {avg_loss:.4f}")
@@ -335,15 +318,15 @@ def train_on_participant(participant_id, global_config,
             results['avg_loss'] = avg_loss
 
             logger.log_eval(results, participant_id,
-                           _cached_global_step)
+                           _local.global_step)
 
-            if results['action_r5'] > _cached_best_action_r5:
-                _cached_best_action_r5 = results['action_r5']
+            if results['action_r5'] > _local.best_action_r5:
+                _local.best_action_r5 = results['action_r5']
                 print(f"New best Action R@5: "
-                      f"{_cached_best_action_r5:.2f}%")
+                      f"{_local.best_action_r5:.2f}%")
 
         # Save epoch history
-        _cached_history[participant_id][f'epoch_{epoch}'] = {
+        _local.history[participant_id][f'epoch_{epoch}'] = {
             'avg_loss': avg_loss,
             'verb_loss': avg_verb,
             'noun_loss': avg_noun,
@@ -356,7 +339,7 @@ def train_on_participant(participant_id, global_config,
         }
 
         # Update total training time
-        _cached_total_train_time += time.time() - participant_start_time
+        _local.total_train_time += time.time() - participant_start_time
         participant_start_time = time.time()
 
         # Save checkpoint
@@ -369,26 +352,26 @@ def train_on_participant(participant_id, global_config,
             config=experiment_config,
             participant_id=participant_id,
             epoch=epoch,
-            global_step=_cached_global_step,
+            global_step=_local.global_step,
             results=results,
-            best_action_r5=_cached_best_action_r5,
-            participants_trained=_cached_participants_trained,
-            total_train_time=_cached_total_train_time,
-            history=_cached_history,
+            best_action_r5=_local.best_action_r5,
+            participants_trained=_local.participants_trained,
+            total_train_time=_local.total_train_time,
+            history=_local.history,
         )
 
     # Mark participant as trained
-    _cached_participants_trained.append(participant_id)
+    _local.participants_trained.append(participant_id)
 
     logger.log_participant_summary(
         participant_id=participant_id,
         results=results,
-        best_action_r5=_cached_best_action_r5,
-        participants_done=len(_cached_participants_trained),
+        best_action_r5=_local.best_action_r5,
+        participants_done=len(_local.participants_trained),
         total_participants=_count_participants(
             os.path.expanduser(paths['train_csv'])
         ),
-        global_step=_cached_global_step,
+        global_step=_local.global_step,
     )
 
     print(f"\n{participant_id} training complete "
