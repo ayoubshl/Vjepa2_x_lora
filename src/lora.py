@@ -1,19 +1,127 @@
 """
 LoRA and QLoRA setup for V-JEPA 2 encoder.
 
-Applies low-rank adapters to attention layers.
+Applies low-rank adapters to attention layers by manually
+replacing Linear layers with LoRALinear wrappers.
+
+Does NOT use peft's get_peft_model (which fails on VJEPA2Encoder).
+Instead walks the encoder's module tree and injects LoRA directly.
+
 Supports:
   - Full LoRA (all encoder layers)
   - Upper-layer LoRA (last N layers only)
   - QLoRA (4-bit quantized base + LoRA)
 """
 
-from peft import LoraConfig, get_peft_model
+import re
+import torch
+import torch.nn as nn
 
+
+# ─── LoRA Layer ─────────────────────────────────────────────────────
+
+class LoRALinear(nn.Module):
+    """
+    Wraps a frozen nn.Linear with a parallel low-rank branch.
+
+    out = W_frozen @ x + (B @ A @ x) * (alpha / r)
+
+    Only A and B are trainable. W_frozen is kept intact.
+    B is initialized to zero so LoRA starts as identity.
+    """
+
+    def __init__(self, linear, r, alpha, dropout=0.0):
+        super().__init__()
+        self.linear = linear
+        self.r = r
+        self.scaling = alpha / r
+
+        in_features = linear.in_features
+        out_features = linear.out_features
+
+        self.lora_A = nn.Linear(in_features, r, bias=False)
+        self.lora_B = nn.Linear(r, out_features, bias=False)
+        self.dropout = nn.Dropout(p=dropout) if dropout > 0 else nn.Identity()
+
+        # Init: A ~ kaiming, B = 0 → LoRA output is zero at start
+        nn.init.kaiming_uniform_(self.lora_A.weight, a=5 ** 0.5)
+        nn.init.zeros_(self.lora_B.weight)
+
+        # Freeze original weights
+        for param in self.linear.parameters():
+            param.requires_grad = False
+
+    def forward(self, x):
+        base = self.linear(x)
+        lora = self.lora_B(self.lora_A(self.dropout(x))) * self.scaling
+        return base + lora
+
+
+# ─── Module Injection ───────────────────────────────────────────────
+
+def _find_and_replace(model, target_names, lora_r, lora_alpha,
+                      lora_dropout, layer_indices=None):
+    """
+    Walks the encoder module tree and replaces matching Linear
+    layers with LoRALinear.
+
+    Args:
+        model:         V-JEPA 2 model
+        target_names:  list of module name suffixes to target
+                       e.g. ['query', 'value']
+        lora_r:        LoRA rank
+        lora_alpha:    LoRA alpha scaling
+        lora_dropout:  dropout before LoRA branch
+        layer_indices: set of layer indices to target, or None for all
+
+    Returns:
+        count of replaced modules
+    """
+    replaced = 0
+
+    # Walk all named modules in the encoder
+    for name, module in model.encoder.named_modules():
+        if not isinstance(module, nn.Linear):
+            continue
+
+        # Check if this module's name ends with a target name
+        short_name = name.split('.')[-1]
+        if short_name not in target_names:
+            continue
+
+        # Check layer index if upper-layers-only mode
+        if layer_indices is not None:
+            layer_match = re.search(r'layer\.(\d+)', name)
+            if layer_match:
+                idx = int(layer_match.group(1))
+                if idx not in layer_indices:
+                    continue
+
+        # Replace the module
+        lora_module = LoRALinear(
+            linear=module,
+            r=lora_r,
+            alpha=lora_alpha,
+            dropout=lora_dropout,
+        )
+
+        # Navigate to parent and replace
+        parts = name.split('.')
+        parent = model.encoder
+        for part in parts[:-1]:
+            parent = getattr(parent, part)
+        setattr(parent, parts[-1], lora_module)
+
+        replaced += 1
+
+    return replaced
+
+
+# ─── Public API ─────────────────────────────────────────────────────
 
 def apply_lora(model, config):
     """
-    Wraps the encoder with LoRA adapters.
+    Applies LoRA to V-JEPA 2 encoder attention layers.
 
     Args:
         model:  V-JEPA 2 model (already frozen)
@@ -28,40 +136,34 @@ def apply_lora(model, config):
     target_modules = config.get('lora_target_modules', ['query', 'value'])
 
     # Upper layers only mode
+    layer_indices = None
     upper_only = config.get('lora_upper_layers_only', False)
     if upper_only:
         num_upper = int(config.get('lora_num_upper_layers', 6))
         total_layers = model.config.num_hidden_layers
         start_layer = total_layers - num_upper
+        layer_indices = set(range(start_layer, total_layers))
 
-        # Build layer-specific target patterns
-        # Only target layers from start_layer to total_layers-1
-        layer_targets = []
-        for layer_idx in range(start_layer, total_layers):
-            for module in target_modules:
-                layer_targets.append(f"layer.{layer_idx}.*.{module}")
+        print(f"LoRA upper layers only: layers {start_layer}-"
+              f"{total_layers - 1} ({num_upper}/{total_layers} layers)")
 
-        target_modules = layer_targets
-        print(f"LoRA upper layers only: layers {start_layer}-{total_layers - 1} "
-              f"({num_upper}/{total_layers} layers)")
-
-    lora_config = LoraConfig(
-        r=lora_r,
+    count = _find_and_replace(
+        model=model,
+        target_names=target_modules,
+        lora_r=lora_r,
         lora_alpha=lora_alpha,
-        target_modules=target_modules,
         lora_dropout=lora_dropout,
-        bias="none",
+        layer_indices=layer_indices,
     )
 
-    model.encoder = get_peft_model(model.encoder, lora_config)
+    # Count trainable params
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total = sum(p.numel() for p in model.parameters())
 
     print(f"LoRA applied (r={lora_r}, alpha={lora_alpha}):")
-    model.encoder.print_trainable_parameters()
-
-    # Gradient checkpointing to save VRAM
-    if hasattr(model.encoder, 'gradient_checkpointing_enable'):
-        model.encoder.gradient_checkpointing_enable()
-        print("Gradient checkpointing enabled")
+    print(f"  Replaced {count} Linear layers with LoRALinear")
+    print(f"  Trainable: {trainable / 1e6:.2f}M / {total / 1e6:.1f}M "
+          f"({100 * trainable / total:.2f}%)")
 
     return model
 
@@ -89,7 +191,7 @@ def apply_qlora(model, config):
             "Install with: pip install bitsandbytes"
         )
 
-    # QLoRA uses the same LoRA application on a quantized model
+    # QLoRA uses the same LoRA injection on a quantized model
     return apply_lora(model, config)
 
 
