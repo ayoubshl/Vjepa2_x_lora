@@ -1,21 +1,28 @@
 """
-Pipeline Manager — orchestrates the download → train → delete cycle.
+Pipeline Manager — orchestrates download → train → delete.
 
-This is the main loop that runs unattended in tmux.
-Coordinates the scheduler, downloader, and training.
+Supports two modes:
+  - Single experiment on one GPU
+  - Two experiments in parallel on two GPUs, sharing frames
+
+In parallel mode, both experiments train on the same participant
+simultaneously. Download of participant N+1 starts as soon as
+training on N begins, hiding download latency behind training time.
 
 Flow:
   1. Build global vocabulary (once)
-  2. Download first participant (blocking)
-  3. Start background download of next
-  4. Train on current participant
-  5. Delete trained participant, shift queue
-  6. Repeat until all participants done
+  2. Download participant N (blocking if not on disk)
+  3. Start background download of participant N+1
+  4. Train both experiments on N in parallel (separate GPUs)
+  5. Wait for both to finish + N+1 download to finish
+  6. Delete N, move to N+1
+  7. Repeat until all participants done
 """
 
 import os
-import time
-import yaml
+import copy
+import threading
+import traceback
 
 from pipeline.downloader import FrameDownloader
 from pipeline.scheduler import PipelineScheduler
@@ -27,12 +34,14 @@ class PipelineManager:
     """
     Args:
         global_config:      parsed global.yaml
-        experiment_config:  parsed experiment yaml (baseline, lora, etc.)
+        experiments:        list of (experiment_config, device_string) tuples
+                            e.g. [(baseline_cfg, 'cuda:0'), (lora_cfg, 'cuda:1')]
+                            or   [(baseline_cfg, 'cuda:0')]  for single mode
     """
 
-    def __init__(self, global_config, experiment_config):
+    def __init__(self, global_config, experiments):
         self.global_config = global_config
-        self.experiment_config = experiment_config
+        self.experiments = experiments
 
         paths = global_config['paths']
         pipeline = global_config['pipeline']
@@ -41,29 +50,34 @@ class PipelineManager:
         self.train_csv = os.path.expanduser(paths['train_csv'])
         self.val_csv = os.path.expanduser(paths['val_csv'])
         self.vocab_path = os.path.expanduser(paths['vocabulary_path'])
-        self.checkpoints_dir = os.path.expanduser(
-            os.path.join(paths['checkpoints_dir'],
-                         experiment_config['experiment_name'])
-        )
-        self.results_dir = os.path.expanduser(
-            os.path.join(paths['results_dir'],
-                         experiment_config['experiment_name'])
-        )
 
-        # State file per experiment so experiments don't clash
-        state_path = os.path.join(
-            self.checkpoints_dir, 'pipeline_state.json'
-        )
+        # Create checkpoint/results dirs for each experiment
+        for exp_config, _ in self.experiments:
+            ckpt_dir = os.path.expanduser(
+                os.path.join(paths['checkpoints_dir'],
+                             exp_config['experiment_name'])
+            )
+            res_dir = os.path.expanduser(
+                os.path.join(paths['results_dir'],
+                             exp_config['experiment_name'])
+            )
+            os.makedirs(ckpt_dir, exist_ok=True)
+            os.makedirs(res_dir, exist_ok=True)
 
-        os.makedirs(self.checkpoints_dir, exist_ok=True)
-        os.makedirs(self.results_dir, exist_ok=True)
         os.makedirs(self.frames_dir, exist_ok=True)
 
-        # Initialize components
+        # Shared downloader
         self.downloader = FrameDownloader(
             downloader_dir=os.path.expanduser(paths['downloader_dir']),
             frames_dir=self.frames_dir
         )
+
+        # Shared scheduler — state file in first experiment's checkpoint dir
+        first_ckpt = os.path.expanduser(
+            os.path.join(paths['checkpoints_dir'],
+                         experiments[0][0]['experiment_name'])
+        )
+        state_path = os.path.join(first_ckpt, 'pipeline_state.json')
 
         self.scheduler = PipelineScheduler(
             train_csv=self.train_csv,
@@ -72,99 +86,151 @@ class PipelineManager:
         )
 
     def run(self):
-        """
-        Main pipeline loop. Runs until all participants are trained.
-        """
+        """Main pipeline loop. Handles both single and parallel modes."""
+        exp_names = [cfg['experiment_name'] for cfg, _ in self.experiments]
+        devices = [dev for _, dev in self.experiments]
+
         print("\n" + "=" * 60)
         print("PIPELINE START")
-        print(f"Experiment: {self.experiment_config['experiment_name']}")
+        for name, dev in zip(exp_names, devices):
+            print(f"  {name} on {dev}")
         print("=" * 60)
 
-        # Step 1: Build or load vocabulary
+        # Step 1: Vocabulary
         self._ensure_vocabulary()
-
-        # Step 2: Load vocabulary
         action_to_id, num_actions = load_action_vocabulary(self.vocab_path)
 
         self.scheduler.summary()
 
-        # Track background download thread
-        bg_download_thread = None
-        bg_download_participant = None
-
-        # Step 3: Main loop
+        # Step 2: Main loop
         while not self.scheduler.is_done():
-
-            # Get next participant to train
-            next_train = self.scheduler.get_next_to_train()
-            if next_train is None:
+            current = self.scheduler.get_next_to_train()
+            if current is None:
                 break
 
-            # Ensure this participant is on disk
-            if not self.downloader.participant_ready(next_train):
-                # Need to download it (blocking)
-                print(f"\n{next_train} not on disk — downloading (blocking)...")
-                success = self.downloader.download_participant(next_train)
+            # Download current participant if needed (blocking)
+            if not self.downloader.participant_ready(current):
+                print(f"\n{current} not on disk — downloading (blocking)...")
+                success = self.downloader.download_participant(current)
                 if not success:
-                    print(f"FATAL: Failed to download {next_train}")
+                    print(f"FATAL: Failed to download {current}")
                     break
-                self.scheduler.mark_on_disk(next_train)
+                self.scheduler.mark_on_disk(current)
 
-            # Start background download of next participant
-            bg_download_thread, bg_download_participant = (
-                self._start_background_download(
-                    bg_download_thread, bg_download_participant
-                )
-            )
-
-            # Train on current participant
-            self.scheduler.mark_training(next_train)
+            self.scheduler.mark_training(current)
             self.scheduler.summary()
 
+            # Prefetch next participant in background
+            bg_thread, bg_participant = self._start_prefetch(current)
+
+            # Train all experiments on current participant
             print(f"\n{'=' * 60}")
-            print(f"TRAINING: {next_train}")
+            print(f"TRAINING: {current}")
+            for name, dev in zip(exp_names, devices):
+                print(f"  {name} on {dev}")
             print(f"{'=' * 60}")
 
-            train_on_participant(
-                participant_id=next_train,
-                global_config=self.global_config,
-                experiment_config=self.experiment_config,
-                action_to_id=action_to_id,
-                num_actions=num_actions,
+            errors = self._train_parallel(
+                current, action_to_id, num_actions
             )
 
-            # Mark as trained
-            self.scheduler.mark_trained(next_train)
+            for name, err in errors.items():
+                if err is not None:
+                    print(f"WARNING: {name} failed on {current}: {err}")
 
-            # Wait for background download before deleting
-            if bg_download_thread is not None and bg_download_thread.is_alive():
-                print(f"\nWaiting for {bg_download_participant} download...")
-                bg_download_thread.join()
-                self.scheduler.mark_on_disk(bg_download_participant)
-                bg_download_thread = None
-                bg_download_participant = None
+            # Mark trained
+            self.scheduler.mark_trained(current)
 
-            # Delete trained participant to free space
-            self.downloader.delete_participant(next_train)
-            self.scheduler.mark_deleted(next_train)
+            # Wait for prefetch before deleting
+            if bg_thread is not None and bg_thread.is_alive():
+                print(f"\nWaiting for {bg_participant} download...")
+                bg_thread.join()
+            if bg_participant is not None:
+                self.scheduler.mark_on_disk(bg_participant)
 
-            # Start next background download if room
-            bg_download_thread, bg_download_participant = (
-                self._start_background_download(
-                    bg_download_thread, bg_download_participant
-                )
-            )
+            # Delete current participant
+            self.downloader.delete_participant(current)
+            self.scheduler.mark_deleted(current)
 
             self.scheduler.summary()
-
-        # Cleanup: wait for any remaining download
-        if bg_download_thread is not None and bg_download_thread.is_alive():
-            bg_download_thread.join()
 
         print("\n" + "=" * 60)
         print("PIPELINE COMPLETE")
-        print(f"Trained on {len(self.scheduler.state['trained'])} participants")
+        print(f"Trained on {len(self.scheduler.state['trained'])} "
+              "participants")
         print("=" * 60)
+
+    def _train_parallel(self, participant_id, action_to_id, num_actions):
+        """
+        Runs all experiments on one participant in parallel threads.
+        Each experiment gets its own deep-copied global_config with
+        the correct device.
+
+        Returns:
+            dict of {experiment_name: exception_or_None}
+        """
+        errors = {}
+        threads = []
+
+        for exp_config, device in self.experiments:
+            name = exp_config['experiment_name']
+            errors[name] = None
+
+            # Each trainer gets its own config copy with correct device
+            gcfg = copy.deepcopy(self.global_config)
+            gcfg['pipeline']['device'] = device
+
+            def run_trainer(n=name, gc=gcfg, ec=exp_config):
+                try:
+                    train_on_participant(
+                        participant_id=participant_id,
+                        global_config=gc,
+                        experiment_config=ec,
+                        action_to_id=action_to_id,
+                        num_actions=num_actions,
+                    )
+                except Exception as e:
+                    errors[n] = e
+                    print(f"\nERROR in {n}: {e}")
+                    traceback.print_exc()
+
+            t = threading.Thread(target=run_trainer, name=name)
+            threads.append(t)
+
+        # Start all
+        for t in threads:
+            t.start()
+
+        # Wait for all
+        for t in threads:
+            t.join()
+
+        return errors
+
+    def _start_prefetch(self, current_participant):
+        """
+        Starts background download of the next participant.
+
+        Returns:
+            (thread, participant_id) or (None, None)
+        """
+        remaining = self.scheduler.get_remaining_participants()
+        next_p = None
+        for p in remaining:
+            if p != current_participant:
+                next_p = p
+                break
+
+        if next_p is None:
+            return None, None
+
+        if self.downloader.participant_ready(next_p):
+            self.scheduler.mark_on_disk(next_p)
+            return None, next_p
+
+        thread = self.downloader.download_in_background(next_p)
+        print(f"Prefetch started: {next_p}")
+        return thread, next_p
 
     def _ensure_vocabulary(self):
         """Builds vocabulary if it doesn't exist yet."""
@@ -177,44 +243,3 @@ class PipelineManager:
             train_csv=self.train_csv,
             save_path=self.vocab_path
         )
-
-    def _start_background_download(self, current_thread,
-                                   current_participant):
-        """
-        Starts a background download if:
-          - No download is currently running
-          - There's room on disk
-          - There are participants left to download
-
-        Args:
-            current_thread:      existing bg thread or None
-            current_participant:  participant being downloaded or None
-
-        Returns:
-            (thread, participant_id) tuple
-        """
-        # Already downloading
-        if current_thread is not None and current_thread.is_alive():
-            return current_thread, current_participant
-
-        # Check if finished download needs to be registered
-        if current_thread is not None and current_participant is not None:
-            self.scheduler.mark_on_disk(current_participant)
-
-        # Check disk space
-        if not self.scheduler.should_download_more():
-            return None, None
-
-        # Get next to download
-        next_dl = self.scheduler.get_next_to_download()
-        if next_dl is None:
-            return None, None
-
-        # Already on disk
-        if self.downloader.participant_ready(next_dl):
-            self.scheduler.mark_on_disk(next_dl)
-            return None, None
-
-        # Start download
-        thread = self.downloader.download_in_background(next_dl)
-        return thread, next_dl
