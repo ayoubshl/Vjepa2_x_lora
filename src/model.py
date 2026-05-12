@@ -2,7 +2,7 @@
 V-JEPA 2 model loading and feature extraction.
 
 Handles loading from HuggingFace, freezing all parameters,
-and extracting concatenated encoder + predictor features.
+and extracting encoder features for downstream tasks.
 LoRA wrapping is handled separately in src/lora.py.
 """
 
@@ -37,37 +37,27 @@ def load_model(hf_repo, device):
     total_params = sum(p.numel() for p in model.parameters())
     print(f"Model loaded: {total_params / 1e6:.1f}M params (all frozen)")
     print(f"  encoder hidden_size: {model.config.hidden_size}")
-    print(f"  predictor hidden_size: {model.config.pred_hidden_size}")
 
     return model, processor
 
 
 def extract_features(model, pixel_values):
     """
-    Forward pass through encoder and predictor.
-    Returns concatenated features.
+    Forward pass through encoder only.
+    Predictor is discarded — it's a pretraining artifact.
 
     Input:  pixel_values  [B, T, C, H, W]
-    Output: features      [B, num_patches, hidden_size + pred_hidden_size]
+    Output: features      [B, num_patches, hidden_size]
 
     For vitl-fpc64-256:
-      encoder:     [B, 8192, 1024]
-      predictor:   [B, 8192, 1024]
-      concatenated: [B, 8192, 2048]
+      encoder: [B, 8192, 1024]
     """
     outputs = model(pixel_values_videos=pixel_values)
-    encoder_features = outputs.last_hidden_state
-    predictor_features = outputs.predictor_output.last_hidden_state
-
-    features = torch.cat(
-        [encoder_features, predictor_features], dim=-1
-    )
-    return features
+    return outputs.last_hidden_state
 
 
 def get_feature_dim(model):
     """
-    Returns the concatenated feature dimension.
-    hidden_size + pred_hidden_size (e.g. 1024 + 1024 = 2048)
+    Returns the encoder output dimension.
     """
-    return model.config.hidden_size + model.config.pred_hidden_size
+    return model.config.hidden_size  # 1024
