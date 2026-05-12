@@ -97,13 +97,16 @@ def _find_and_replace(model, target_names, lora_r, lora_alpha,
                 if idx not in layer_indices:
                     continue
 
-        # Replace the module
+        # Get device of the original module
+        device = next(module.parameters()).device
+
+        # Replace the module — move LoRA weights to same device
         lora_module = LoRALinear(
             linear=module,
             r=lora_r,
             alpha=lora_alpha,
             dropout=lora_dropout,
-        )
+        ).to(device)
 
         # Navigate to parent and replace
         parts = name.split('.')
