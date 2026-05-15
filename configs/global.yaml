@@ -6,17 +6,17 @@
 
 # Paths
 paths:
-  project_dir:      ~/Vjepa2_x_lora
-  videos_dir:       ~/Vjepa2_x_lora/videos          # raw MP4 files
-  annotations_dir:  ~/Vjepa2_x_lora/annotations
-  train_csv:        ~/Vjepa2_x_lora/annotations/EPIC_100_train.csv
-  val_csv:          ~/Vjepa2_x_lora/annotations/EPIC_100_validation.csv
-  participants_file: ~/Vjepa2_x_lora/participants.txt   # fixed subset list
-  checkpoints_dir:  ~/Vjepa2_x_lora/checkpoints
-  predictions_dir:  ~/Vjepa2_x_lora/predictions     # raw logits per experiment
-  results_dir:      ~/Vjepa2_x_lora/results
-  vocabulary_path:  ~/Vjepa2_x_lora/vocabulary.json
-  annotation_cache_dir: ~/Vjepa2_x_lora/annotation_cache  # parsed CSV pickles
+  project_dir:      .
+  videos_dir:       videos          # raw MP4 files
+  annotations_dir:  annotations
+  train_csv:        annotations/EPIC_100_train.csv
+  val_csv:          annotations/EPIC_100_validation.csv
+  participants_file: participants.txt   # fixed subset list
+  checkpoints_dir:  checkpoints
+  predictions_dir:  predictions     # raw logits per experiment
+  results_dir:      results
+  vocabulary_path:  vocabulary.json
+  annotation_cache_dir: annotation_cache  # parsed CSV pickles
 
 # V-JEPA 2 model
 # Hidden sizes are read from model.config at runtime

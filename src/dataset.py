@@ -100,6 +100,8 @@ class EK100AnticipationDataset(Dataset):
         anticipation_s: paper anticipation gap (seconds)
         split:          'train' or 'validation' (logging only)
         cache_dir:      if given, cache parsed annotations here for fast reload
+        allow_decode_errors: if true, bad video reads return a zero clip.
+                             Keep this false for paper measurements.
     """
 
     def __init__(
@@ -115,6 +117,7 @@ class EK100AnticipationDataset(Dataset):
         anticipation_s: float = 1.0,
         split: str = "train",
         cache_dir: Optional[str] = None,
+        allow_decode_errors: bool = False,
     ):
         if decord is None:
             raise ImportError(
@@ -130,6 +133,7 @@ class EK100AnticipationDataset(Dataset):
         self.num_frames = int(num_frames)
         self.anticipation_s = float(anticipation_s)
         self.split = split
+        self.allow_decode_errors = bool(allow_decode_errors)
 
         # HINT: cache parsed/filtered annotations to a pickle. First load is
         # slow (CSV parse + per-row checks); subsequent loads are instant.
@@ -137,14 +141,14 @@ class EK100AnticipationDataset(Dataset):
         if cache_dir is not None:
             os.makedirs(cache_dir, exist_ok=True)
             tag = (
-                f"{split}_p{'-'.join(participants) if participants else 'all'}"
+                f"v2_{split}_p{'-'.join(participants) if participants else 'all'}"
                 f"_f{num_frames}_fps{fps_target}_a{anticipation_s}"
             )
             # Hash long participant lists to keep filename sane
             if participants is not None and len(participants) > 5:
                 import hashlib
                 h = hashlib.md5(",".join(sorted(participants)).encode()).hexdigest()[:8]
-                tag = f"{split}_p{len(participants)}-{h}_f{num_frames}_fps{fps_target}_a{anticipation_s}"
+                tag = f"v2_{split}_p{len(participants)}-{h}_f{num_frames}_fps{fps_target}_a{anticipation_s}"
             cache_path = os.path.join(cache_dir, f"{tag}.pkl")
 
         if cache_path and os.path.exists(cache_path):
@@ -172,7 +176,7 @@ class EK100AnticipationDataset(Dataset):
             self.fps_source * self.num_frames / self.fps_target
         )
         n_before = len(df)
-        df = df[df["start_frame"] > min_start].reset_index(drop=True)
+        df = df[df["start_frame"] >= min_start].reset_index(drop=True)
         n_dropped_underflow = n_before - len(df)
 
         # Drop clips whose video file doesn't exist on disk.
@@ -199,13 +203,25 @@ class EK100AnticipationDataset(Dataset):
         return df
 
     def _video_exists(self, row) -> bool:
-        path = self._video_path(row["participant_id"], row["video_id"])
-        return os.path.exists(path)
+        return self._video_path(row["participant_id"], row["video_id"]) is not None
 
     def _video_path(self, participant_id: str, video_id: str) -> str:
-        # EK-100 video naming: PXX_YY.MP4 inside PXX/ folder
-        # HINT: if you downloaded with a different layout, change here.
-        return os.path.join(self.videos_dir, participant_id, f"{video_id}.MP4")
+        # Support both the project's compact layout and the official
+        # epic_downloader.py layout.
+        candidates = [
+            os.path.join(self.videos_dir, participant_id, f"{video_id}.MP4"),
+            os.path.join(self.videos_dir, participant_id, "videos", f"{video_id}.MP4"),
+            os.path.join(
+                self.videos_dir, "EPIC-KITCHENS", participant_id, "videos", f"{video_id}.MP4"
+            ),
+            os.path.join(
+                self.videos_dir, "EPIC-KITCHENS", participant_id, f"{video_id}.MP4"
+            ),
+        ]
+        for path in candidates:
+            if os.path.exists(path):
+                return path
+        return None
 
     def __len__(self) -> int:
         return len(self.annotations)
@@ -232,14 +248,21 @@ class EK100AnticipationDataset(Dataset):
             raise RuntimeError(f"Underflow at idx={idx} despite filtering")
 
         video_path = self._video_path(row["participant_id"], row["video_id"])
+        if video_path is None:
+            raise FileNotFoundError(
+                f"[{self.split}] video not found for participant={row['participant_id']} "
+                f"video_id={row['video_id']} under {self.videos_dir}"
+            )
 
         try:
             frames = self._load_video_frames(video_path, frame_indices)
         except Exception as e:
-            # HINT: never let one bad clip kill training. Log and return a
-            # zero-filled fallback. If you see this happen often, debug
-            # the offending file rather than training on garbage.
-            print(f"[{self.split}] WARN failed to load {video_path}: {e}")
+            if not self.allow_decode_errors:
+                raise RuntimeError(
+                    f"[{self.split}] failed to decode {video_path} "
+                    f"at indices {frame_indices.tolist()}"
+                ) from e
+            print(f"[{self.split}] WARN failed to load {video_path}; using zero clip: {e}")
             frames = torch.zeros(self.num_frames, 3, 256, 256, dtype=torch.uint8)
 
         # HF AutoVideoProcessor expects (T, C, H, W) uint8 or (T, H, W, C).
@@ -259,6 +282,7 @@ class EK100AnticipationDataset(Dataset):
             "verb_label":   torch.tensor(verb_class, dtype=torch.long),
             "noun_label":   torch.tensor(noun_class, dtype=torch.long),
             "action_label": torch.tensor(action_class, dtype=torch.long),
+            "participant_id": row["participant_id"],
             "video_id":     row["video_id"],
             "start_frame":  start_frame,
         }
@@ -313,6 +337,7 @@ def build_dataloader(
     split: str,
     cache_dir: Optional[str] = None,
     shuffle: Optional[bool] = None,
+    allow_decode_errors: bool = False,
 ) -> DataLoader:
     """
     Build a DataLoader for train or validation.
@@ -335,6 +360,7 @@ def build_dataloader(
         anticipation_s=anticipation_s,
         split=split,
         cache_dir=cache_dir,
+        allow_decode_errors=allow_decode_errors,
     )
 
     if len(dataset) == 0:
@@ -352,6 +378,12 @@ def build_dataloader(
         drop_last=(split == "train"),  # avoid uneven last batch in training
         persistent_workers=(num_workers > 0),
     )
+
+    if len(loader) == 0:
+        raise ValueError(
+            f"[{split}] DataLoader has zero batches for {len(dataset)} clips. "
+            "Reduce batch_size or disable drop_last for this split."
+        )
 
     print(f"[{split}] {len(loader)} batches | batch_size={batch_size}")
     return loader

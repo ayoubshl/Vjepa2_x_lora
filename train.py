@@ -1,7 +1,7 @@
 """
 Main training loop.
 
-# Single global training run over the full fixed dataset. No participant
+# Single training run over a fixed participant subset. No participant
 # streaming. Same data, same probe, same loss across all experiments —
 # only the encoder treatment changes (frozen / LoRA / QLoRA).
 #
@@ -14,7 +14,7 @@ Main training loop.
 #   6. Build probe (paper-matched: 4 blocks, 16 heads, 3 query tokens)
 #   7. Build optimizer + scheduler + loss
 #   8. Train for N epochs; checkpoint each epoch
-#   9. Final mean-class R@5 evaluation on full validation set
+#   9. Final mean-class R@5 evaluation on the fixed validation subset
 """
 
 import os
@@ -98,6 +98,7 @@ def train(global_config: Dict, experiment_config: Dict) -> None:
     device = torch.device(
         runtime["device"] if torch.cuda.is_available() else "cpu"
     )
+    use_cuda = device.type == "cuda"
 
     # ----- 2. Vocabulary (built from FULL train CSV, not subset) -----
     if os.path.exists(paths["vocabulary_path"]):
@@ -111,6 +112,10 @@ def train(global_config: Dict, experiment_config: Dict) -> None:
     # ----- 3. Participant subset -----
     participants = _read_participants_file(paths["participants_file"])
     print(f"[run] participants ({len(participants)}): {participants}")
+    print(
+        "[run] protocol: fixed participant subset from participants.txt; "
+        "do not compare directly to full EK-100 unless this list is complete"
+    )
 
     # ----- 4. Load model (FIRST, before dataloaders, so processor is ready) -----
     use_qlora = bool(experiment_config.get("use_qlora", False))
@@ -150,9 +155,11 @@ def train(global_config: Dict, experiment_config: Dict) -> None:
         anticipation_s=float(dataset_cfg["anticipation_seconds"]),
         split="train",
         cache_dir=paths["annotation_cache_dir"],
+        allow_decode_errors=False,
     )
 
-    # Validation: use the same participant subset (we only have these on disk)
+    # Validation uses the same fixed participant subset because storage limits
+    # prevent keeping the full EK-100 validation set locally.
     val_loader = build_dataloader(
         csv_path=paths["val_csv"],
         videos_dir=paths["videos_dir"],
@@ -167,6 +174,7 @@ def train(global_config: Dict, experiment_config: Dict) -> None:
         anticipation_s=float(dataset_cfg["anticipation_seconds"]),
         split="validation",
         cache_dir=paths["annotation_cache_dir"],
+        allow_decode_errors=False,
     )
 
     # ----- 8. Optimizer + scheduler + loss -----
@@ -180,10 +188,6 @@ def train(global_config: Dict, experiment_config: Dict) -> None:
     num_epochs = int(train_cfg["num_epochs"])
     eval_mid = bool(train_cfg.get("eval_mid_training", False))
     eval_at_end = bool(train_cfg.get("eval_at_end", True))
-
-    # HINT: GradScaler for fp16 grad scaling. For bf16, scaler is a no-op
-    # but we still wire it the same way for code uniformity.
-    scaler = torch.amp.GradScaler("cuda", enabled=False)  # bf16 doesn't need it
 
     # ----- 9. Resume if checkpoint exists -----
     ckpt = load_checkpoint(checkpoints_dir, model, probe, optimizer, scheduler, device=device)
@@ -202,7 +206,8 @@ def train(global_config: Dict, experiment_config: Dict) -> None:
 
     # ----- 10. Training loop -----
     print(f"\n{'=' * 70}\nTRAINING: {exp_name}\n{'=' * 70}")
-    torch.cuda.reset_peak_memory_stats(device)
+    if use_cuda:
+        torch.cuda.reset_peak_memory_stats(device)
     overall_start = time.time()
 
     for epoch in range(start_epoch, num_epochs + 1):
@@ -223,7 +228,11 @@ def train(global_config: Dict, experiment_config: Dict) -> None:
             n_lab = batch["noun_label"].to(device, non_blocking=True)
             a_lab = batch["action_label"].to(device, non_blocking=True)
 
-            with torch.amp.autocast("cuda", dtype=torch.bfloat16, enabled=use_bf16):
+            with torch.amp.autocast(
+                device.type if use_cuda else "cpu",
+                dtype=torch.bfloat16,
+                enabled=bool(use_bf16 and use_cuda),
+            ):
                 enc_feat, pred_feat = extract_features(model, frames)
                 v_log, n_log, a_log = probe(enc_feat, pred_feat)
                 total_loss, loss_dict = loss_fn(
@@ -266,7 +275,7 @@ def train(global_config: Dict, experiment_config: Dict) -> None:
         epoch_time = time.time() - epoch_start
         total_train_time += epoch_time
         avg_loss = epoch_loss / max(1, num_batches)
-        peak_mem = torch.cuda.max_memory_allocated(device)
+        peak_mem = torch.cuda.max_memory_allocated(device) if use_cuda else 0
         print(
             f"[epoch {epoch}] avg_loss={avg_loss:.4f}  "
             f"v={epoch_v / max(1, num_batches):.4f}  "
@@ -346,6 +355,7 @@ def train(global_config: Dict, experiment_config: Dict) -> None:
     print(f"  best action mR@5  : {best_action_mR5:.2f}%")
     print(f"  total train time  : {total_train_time:.0f}s ({total_train_time / 60:.1f}m)")
     print(f"  wall-clock total  : {total_wall:.0f}s ({total_wall / 60:.1f}m)")
-    print(f"  peak GPU memory   : {torch.cuda.max_memory_allocated(device) / 1e9:.2f}GB")
+    peak_gpu = torch.cuda.max_memory_allocated(device) if use_cuda else 0
+    print(f"  peak GPU memory   : {peak_gpu / 1e9:.2f}GB")
     print(f"{'=' * 70}\n")
     logger.finish()

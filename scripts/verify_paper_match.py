@@ -49,6 +49,18 @@ PROBE_CKPT_PATH = os.environ.get(
 )
 
 
+def _read_participants_file(path):
+    if not os.path.exists(path):
+        return None
+    participants = []
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                participants.append(line)
+    return participants or None
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--global-config", default="configs/global.yaml")
@@ -133,10 +145,13 @@ def main():
             "(partially loaded) probe and will NOT match the paper number."
         )
 
-    # 5. Validation dataloader (full official val set, optionally subset)
-    participants = None  # use all from val CSV; if you only have a subset on
-                         # disk, this would still work if missing-video clips
-                         # are filtered out
+    # 5. Validation dataloader. In storage-limited runs, use the same fixed
+    # participant subset as training so every method is evaluated identically.
+    participants = _read_participants_file(paths["participants_file"])
+    if participants is None:
+        print("[verify] participants_file not found/empty; using all videos found on disk")
+    else:
+        print(f"[verify] fixed validation subset: {participants}")
     val_loader = build_dataloader(
         csv_path=paths["val_csv"],
         videos_dir=paths["videos_dir"],
@@ -151,6 +166,7 @@ def main():
         anticipation_s=dataset_cfg["anticipation_seconds"],
         split="validation",
         cache_dir=paths["annotation_cache_dir"],
+        allow_decode_errors=False,
     )
 
     # 6. Run evaluation
@@ -166,12 +182,18 @@ def main():
     )
 
     print("\n" + "=" * 70)
-    print("PAPER COMPARISON (V-JEPA 2 ViT-L on EK-100 from Table 5)")
+    print("REFERENCE: V-JEPA 2 ViT-L on FULL EK-100 from Table 5")
     print("=" * 70)
     print(f"  Paper verb mR@5:   57.8 %   |   Yours: {results['verb_mR5']:.2f} %")
     print(f"  Paper noun mR@5:   53.8 %   |   Yours: {results['noun_mR5']:.2f} %")
     print(f"  Paper action mR@5: 32.7 %   |   Yours: {results['action_mR5']:.2f} %")
     print("=" * 70)
+    if participants is not None:
+        print(
+            "[verify] subset run: use this as an internal pipeline sanity check, "
+            "not as a direct full-EK100 reproduction number"
+        )
+        return
     if abs(results["action_mR5"] - 32.7) < 2.0:
         print("[verify] ✓ within 2% of paper — pipeline is correct")
     else:

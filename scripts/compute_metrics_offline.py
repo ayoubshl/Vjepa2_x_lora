@@ -19,8 +19,6 @@ PROJECT_ROOT = os.path.dirname(HERE)
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from typing import Dict
-
 import torch
 
 from src.evaluate import mean_class_recall_at_k
@@ -43,6 +41,11 @@ def main():
     action = mean_class_recall_at_k(
         data["action_logits"], data["action_labels"], k=5, ignore_index=-1
     )
+
+    participants = sorted(set(data.get("participant_id", [])))
+    if participants:
+        print(f"subset participants: {participants}")
+        print(f"saved clips: {len(data.get('video_id', []))}")
 
     print(f"verb   mR@5:  {verb['mean_class_recall'] * 100:.2f}%  "
           f"({verb['num_samples_used']} samples, {verb['num_classes_used']} classes)")

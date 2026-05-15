@@ -10,8 +10,8 @@ Evaluation — mean-class Recall@5, paper-matched protocol.
 # mean-class R@5 gives each class equal weight. The two can differ by
 # 5–15 percentage points. Using the wrong one will get your paper rejected.
 #
-# We also save raw predictions to disk so the official EK-100 evaluation
-# script can be run on them later for the final paper numbers.
+# We also save raw predictions and clip metadata to disk so subset results
+# can be audited and metrics can be recomputed without rerunning inference.
 """
 
 import os
@@ -126,8 +126,8 @@ def evaluate(
         dataloader:            validation DataLoader
         device:                target device
         use_bf16:              autocast bfloat16 for inference speed
-        save_predictions_path: if given, save raw logits + labels to .pt here
-                               (used to recompute metrics later / run official eval)
+        save_predictions_path: if given, save raw logits, labels, and clip
+                               metadata to .pt here
         log_prefix:            for tqdm display
 
     Returns:
@@ -142,6 +142,10 @@ def evaluate(
 
     all_v_logits, all_n_logits, all_a_logits = [], [], []
     all_v_labels, all_n_labels, all_a_labels = [], [], []
+    all_participants, all_video_ids, all_start_frames = [], [], []
+
+    autocast_device = device.type if device.type == "cuda" else "cpu"
+    autocast_enabled = bool(use_bf16 and device.type == "cuda")
 
     for batch in tqdm(dataloader, desc=f"{log_prefix} eval"):
         frames = batch["frames"].to(device, non_blocking=True)
@@ -149,7 +153,9 @@ def evaluate(
         n_label = batch["noun_label"]
         a_label = batch["action_label"]
 
-        with torch.amp.autocast("cuda", dtype=torch.bfloat16, enabled=use_bf16):
+        with torch.amp.autocast(
+            autocast_device, dtype=torch.bfloat16, enabled=autocast_enabled
+        ):
             enc, pred = extract_features(model, frames)
             v_log, n_log, a_log = probe(enc, pred)
 
@@ -160,6 +166,9 @@ def evaluate(
         all_v_labels.append(v_label.cpu())
         all_n_labels.append(n_label.cpu())
         all_a_labels.append(a_label.cpu())
+        all_participants.extend(list(batch["participant_id"]))
+        all_video_ids.extend(list(batch["video_id"]))
+        all_start_frames.extend([int(x) for x in batch["start_frame"]])
 
     all_v_logits = torch.cat(all_v_logits)
     all_n_logits = torch.cat(all_n_logits)
@@ -221,7 +230,9 @@ def evaluate(
     # Run scripts/compute_metrics_offline.py on these .pt files to recompute
     # metrics without re-running inference.
     if save_predictions_path is not None:
-        os.makedirs(os.path.dirname(save_predictions_path), exist_ok=True)
+        save_dir = os.path.dirname(save_predictions_path)
+        if save_dir:
+            os.makedirs(save_dir, exist_ok=True)
         torch.save({
             "verb_logits":   all_v_logits,
             "noun_logits":   all_n_logits,
@@ -229,6 +240,9 @@ def evaluate(
             "verb_labels":   all_v_labels,
             "noun_labels":   all_n_labels,
             "action_labels": all_a_labels,
+            "participant_id": all_participants,
+            "video_id": all_video_ids,
+            "start_frame": all_start_frames,
         }, save_predictions_path)
         print(f"[eval] Saved raw predictions to {save_predictions_path}")
 

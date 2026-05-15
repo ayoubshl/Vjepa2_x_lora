@@ -1,0 +1,745 @@
+﻿Baseline Results
+================
+
+Run: baseline_frozen
+--------------------
+Participant P01
+  Epoch 1 evaluation:
+    Verb R@5:   81.70%
+    Noun R@5:   41.93%
+    Action R@5: 21.97% (865/880 valid)
+    New best Action R@5: 21.97%
+  Epoch 2 evaluation:
+    Verb R@5:   83.07%
+    Noun R@5:   50.68%
+    Action R@5: 30.75% (865/880 valid)
+    New best Action R@5: 30.75%
+  Epoch 3 evaluation:
+    Verb R@5:   80.57%
+    Noun R@5:   50.68%
+    Action R@5: 35.14% (865/880 valid)
+    New best Action R@5: 35.14%
+
+Participant P02
+  Epoch 1 evaluation:
+    Verb R@5:   65.03%
+    Noun R@5:   61.25%
+    Action R@5: 33.95% (430/449 valid)
+  Epoch 2 evaluation:
+    Verb R@5:   71.05%
+    Noun R@5:   65.48%
+    Action R@5: 40.93% (430/449 valid)
+    New best Action R@5: 40.93%
+  Epoch 3 evaluation:
+    Verb R@5:   68.15%
+    Noun R@5:   61.25%
+    Action R@5: 35.35% (430/449 valid)
+
+Participant P03
+  Epoch 1 evaluation:
+    Verb R@5:   77.04%
+    Noun R@5:   29.87%
+    Action R@5: 22.15% (298/318 valid)
+  Epoch 2 evaluation:
+    Verb R@5:   76.73%
+    Noun R@5:   31.13%
+    Action R@5: 24.16% (298/318 valid)
+  Epoch 3 evaluation:
+    Verb R@5:   74.21%
+    Noun R@5:   31.45%
+    Action R@5: 24.50% (298/318 valid)
+
+Participant P04
+  Epoch 1 evaluation:
+    Verb R@5:   65.69%
+    Noun R@5:   28.99%
+    Action R@5: 18.81% (335/376 valid)
+  Epoch 2 evaluation:
+    Verb R@5:   64.89%
+    Noun R@5:   30.85%
+    Action R@5: 20.30% (335/376 valid)
+  Epoch 3 evaluation:
+    Verb R@5:   65.96%
+    Noun R@5:   30.59%
+    Action R@5: 20.00% (335/376 valid)
+
+Participant P05
+  Epoch 1 evaluation:
+    Verb R@5:   69.89%
+    Noun R@5:   27.84%
+    Action R@5: 15.43% (175/176 valid)
+  Epoch 2 evaluation:
+    Verb R@5:   69.32%
+    Noun R@5:   41.48%
+    Action R@5: 19.43% (175/176 valid)
+  Epoch 3 evaluation:
+    Verb R@5:   68.18%
+    Noun R@5:   44.89%
+    Action R@5: 20.57% (175/176 valid)
+
+Participant P06
+  Epoch 1 evaluation:
+    Verb R@5:   66.50%
+    Noun R@5:   37.38%
+    Action R@5: 24.10% (195/206 valid)
+  Epoch 2 evaluation:
+    Verb R@5:   69.42%
+    Noun R@5:   38.35%
+    Action R@5: 25.13% (195/206 valid)
+  Epoch 3 evaluation:
+    Verb R@5:   70.87%
+    Noun R@5:   38.35%
+    Action R@5: 26.15% (195/206 valid)
+
+Participant P07
+  Epoch 1 evaluation:
+    Verb R@5:   69.35%
+    Noun R@5:   44.09%
+    Action R@5: 28.57% (182/186 valid)
+  Epoch 2 evaluation:
+    Verb R@5:   69.35%
+    Noun R@5:   46.77%
+    Action R@5: 31.32% (182/186 valid)
+  Epoch 3 evaluation:
+    Verb R@5:   70.97%
+    Noun R@5:   49.46%
+    Action R@5: 31.87% (182/186 valid)
+
+Participant P08
+  Epoch 1 evaluation:
+    Verb R@5:   63.92%
+    Noun R@5:   32.36%
+    Action R@5: 21.38% (580/618 valid)
+  Epoch 2 evaluation:
+    Verb R@5:   64.24%
+    Noun R@5:   34.79%
+    Action R@5: 23.10% (580/618 valid)
+  Epoch 3 evaluation:
+    Verb R@5:   64.24%
+    Noun R@5:   36.08%
+    Action R@5: 23.79% (580/618 valid)
+
+Participant P09
+  Epoch 1 evaluation:
+    Verb R@5:   83.72%
+    Noun R@5:   18.60%
+    Action R@5: 17.95% (39/43 valid)
+  Epoch 2 evaluation:
+    Verb R@5:   83.72%
+    Noun R@5:   18.60%
+    Action R@5: 17.95% (39/43 valid)
+  Epoch 3 evaluation:
+    Verb R@5:   83.72%
+    Noun R@5:   18.60%
+    Action R@5: 17.95% (39/43 valid)
+
+Participant P10
+  Epoch 1 evaluation:
+    Verb R@5:   51.06%
+    Noun R@5:   22.13%
+    Action R@5: 6.07% (214/235 valid)
+  Epoch 2 evaluation:
+    Verb R@5:   51.91%
+    Noun R@5:   23.83%
+    Action R@5: 7.48% (214/235 valid)
+  Epoch 3 evaluation:
+    Verb R@5:   52.34%
+    Noun R@5:   25.53%
+    Action R@5: 7.01% (214/235 valid)
+
+Participant P11
+  Epoch 1 evaluation:
+    Verb R@5:   66.99%
+    Noun R@5:   32.43%
+    Action R@5: 20.43% (470/515 valid)
+  Epoch 2 evaluation:
+    Verb R@5:   66.80%
+    Noun R@5:   32.43%
+    Action R@5: 20.85% (470/515 valid)
+  Epoch 3 evaluation:
+    Verb R@5:   67.38%
+    Noun R@5:   32.43%
+    Action R@5: 20.85% (470/515 valid)
+
+Participant P12
+  Epoch 1 evaluation:
+    Verb R@5:   38.52%
+    Noun R@5:   11.11%
+    Action R@5: 6.25% (128/135 valid)
+  Epoch 2 evaluation:
+    Verb R@5:   39.26%
+    Noun R@5:   11.11%
+    Action R@5: 5.47% (128/135 valid)
+  Epoch 3 evaluation:
+    Verb R@5:   39.26%
+    Noun R@5:   11.11%
+    Action R@5: 6.25% (128/135 valid)
+
+Participant P13
+  Epoch 1 evaluation:
+    Verb R@5:   71.96%
+    Noun R@5:   39.25%
+    Action R@5: 24.53% (106/107 valid)
+  Epoch 2 evaluation:
+    Verb R@5:   72.90%
+    Noun R@5:   41.12%
+    Action R@5: 26.42% (106/107 valid)
+  Epoch 3 evaluation:
+    Verb R@5:   73.83%
+    Noun R@5:   42.99%
+    Action R@5: 27.36% (106/107 valid)
+
+Participant P14
+  Epoch 1 evaluation:
+    Verb R@5:   86.96%
+    Noun R@5:   28.26%
+    Action R@5: 20.00% (45/46 valid)
+  Epoch 2 evaluation:
+    Verb R@5:   86.96%
+    Noun R@5:   28.26%
+    Action R@5: 20.00% (45/46 valid)
+  Epoch 3 evaluation:
+    Verb R@5:   86.96%
+    Noun R@5:   28.26%
+    Action R@5: 20.00% (45/46 valid)
+
+Participant P15
+  Epoch 1 evaluation:
+    Verb R@5:   69.30%
+    Noun R@5:   28.07%
+    Action R@5: 10.28% (107/114 valid)
+  Epoch 2 evaluation:
+    Verb R@5:   71.05%
+    Noun R@5:   30.70%
+    Action R@5: 11.21% (107/114 valid)
+  Epoch 3 evaluation:
+    Verb R@5:   70.18%
+    Noun R@5:   30.70%
+    Action R@5: 9.35% (107/114 valid)
+
+Participant P16
+  Epoch 1 evaluation:
+    Verb R@5:   48.21%
+    Noun R@5:   14.29%
+    Action R@5: 10.00% (50/56 valid)
+  Epoch 2 evaluation:
+    Verb R@5:   48.21%
+    Noun R@5:   14.29%
+    Action R@5: 10.00% (50/56 valid)
+  Epoch 3 evaluation:
+    Verb R@5:   48.21%
+    Noun R@5:   14.29%
+    Action R@5: 10.00% (50/56 valid)
+
+Participant P17
+  Epoch 1 evaluation:
+    Verb R@5:   34.62%
+    Noun R@5:   7.69%
+    Action R@5: 0.00% (24/26 valid)
+  Epoch 2 evaluation:
+    Verb R@5:   34.62%
+    Noun R@5:   7.69%
+    Action R@5: 0.00% (24/26 valid)
+  Epoch 3 evaluation:
+    Verb R@5:   34.62%
+    Noun R@5:   7.69%
+    Action R@5: 0.00% (24/26 valid)
+
+Participant P19
+  Epoch 1 evaluation:
+    Verb R@5:   50.00%
+    Noun R@5:   45.24%
+    Action R@5: 12.50% (40/42 valid)
+  Epoch 2 evaluation:
+    Verb R@5:   52.38%
+    Noun R@5:   45.24%
+    Action R@5: 12.50% (40/42 valid)
+  Epoch 3 evaluation:
+    Verb R@5:   52.38%
+    Noun R@5:   47.62%
+    Action R@5: 12.50% (40/42 valid)
+
+Participant P20
+  Epoch 1 evaluation:
+    Verb R@5:   81.65%
+    Noun R@5:   48.62%
+    Action R@5: 31.94% (216/218 valid)
+  Epoch 2 evaluation:
+    Verb R@5:   78.90%
+    Noun R@5:   51.83%
+    Action R@5: 32.41% (216/218 valid)
+  Epoch 3 evaluation:
+    Verb R@5:   78.90%
+    Noun R@5:   52.75%
+    Action R@5: 33.33% (216/218 valid)
+
+Participant P21
+  Epoch 1 evaluation:
+    Verb R@5:   56.67%
+    Noun R@5:   25.00%
+    Action R@5: 9.26% (54/60 valid)
+  Epoch 2 evaluation:
+    Verb R@5:   56.67%
+    Noun R@5:   26.67%
+    Action R@5: 9.26% (54/60 valid)
+  Epoch 3 evaluation:
+    Verb R@5:   55.00%
+    Noun R@5:   31.67%
+    Action R@5: 11.11% (54/60 valid)
+
+Participant P22
+  Epoch 1 evaluation:
+    Verb R@5:   84.21%
+    Noun R@5:   55.49%
+    Action R@5: 33.66% (1215/1229 valid)
+  Epoch 2 evaluation:
+    Verb R@5:   86.57%
+    Noun R@5:   60.70%
+    Action R@5: 42.22% (1215/1229 valid)
+    New best Action R@5: 42.22%
+  Epoch 3 evaluation:
+    Verb R@5:   86.90%
+    Noun R@5:   63.55%
+    Action R@5: 44.03% (1215/1229 valid)
+    New best Action R@5: 44.03%
+
+Participant P23
+  Epoch 1 evaluation:
+    Verb R@5:   80.58%
+    Noun R@5:   34.95%
+    Action R@5: 16.00% (100/103 valid)
+  Epoch 2 evaluation:
+    Verb R@5:   85.44%
+    Noun R@5:   41.75%
+    Action R@5: 21.00% (100/103 valid)
+  Epoch 3 evaluation:
+    Verb R@5:   81.55%
+    Noun R@5:   42.72%
+    Action R@5: 23.00% (100/103 valid)
+
+Participant P24
+  Epoch 1 evaluation:
+    Verb R@5:   76.66%
+    Noun R@5:   49.86%
+    Action R@5: 34.40% (343/347 valid)
+  Epoch 2 evaluation:
+    Verb R@5:   76.08%
+    Noun R@5:   51.87%
+    Action R@5: 37.90% (343/347 valid)
+  Epoch 3 evaluation:
+    Verb R@5:   77.81%
+    Noun R@5:   49.28%
+    Action R@5: 35.57% (343/347 valid)
+
+Participant P25
+  Epoch 1 evaluation:
+    Verb R@5:   86.60%
+    Noun R@5:   48.45%
+    Action R@5: 35.42% (96/97 valid)
+  Epoch 2 evaluation:
+    Verb R@5:   85.57%
+    Noun R@5:   53.61%
+    Action R@5: 41.67% (96/97 valid)
+  Epoch 3 evaluation:
+    Verb R@5:   81.44%
+    Noun R@5:   46.39%
+    Action R@5: 37.50% (96/97 valid)
+
+Participant P26
+  Epoch 1 evaluation:
+    Verb R@5:   77.42%
+    Noun R@5:   54.84%
+    Action R@5: 37.22% (180/186 valid)
+  Epoch 2 evaluation:
+    Verb R@5:   77.96%
+    Noun R@5:   58.60%
+    Action R@5: 41.11% (180/186 valid)
+  Epoch 3 evaluation:
+    Verb R@5:   76.88%
+    Noun R@5:   58.06%
+    Action R@5: 40.00% (180/186 valid)
+
+Participant P27
+  Epoch 1 evaluation:
+    Verb R@5:   87.30%
+    Noun R@5:   46.03%
+    Action R@5: 27.87% (61/63 valid)
+  Epoch 2 evaluation:
+    Verb R@5:   87.30%
+    Noun R@5:   50.79%
+    Action R@5: 32.79% (61/63 valid)
+  Epoch 3 evaluation:
+    Verb R@5:   85.71%
+    Noun R@5:   53.97%
+    Action R@5: 34.43% (61/63 valid)
+
+Participant P28
+  Epoch 1 evaluation:
+    Verb R@5:   78.21%
+    Noun R@5:   34.10%
+    Action R@5: 22.79% (373/390 valid)
+  Epoch 2 evaluation:
+    Verb R@5:   80.26%
+    Noun R@5:   36.92%
+    Action R@5: 26.81% (373/390 valid)
+  Epoch 3 evaluation:
+    Verb R@5:   80.00%
+    Noun R@5:   35.38%
+    Action R@5: 24.66% (373/390 valid)
+
+Participant P29
+  Epoch 1 evaluation:
+    Verb R@5:   73.23%
+    Noun R@5:   37.27%
+    Action R@5: 21.58% (584/609 valid)
+  Epoch 2 evaluation:
+    Verb R@5:   69.29%
+    Noun R@5:   38.75%
+    Action R@5: 19.01% (584/609 valid)
+  Epoch 3 evaluation:
+    Verb R@5:   64.20%
+    Noun R@5:   37.77%
+    Action R@5: 20.38% (584/609 valid)
+
+Participant P30
+  Epoch 1 evaluation:
+    Verb R@5:   71.50%
+    Noun R@5:   47.28%
+    Action R@5: 29.70% (606/607 valid)
+  Epoch 2 evaluation:
+    Verb R@5:   73.31%
+    Noun R@5:   47.12%
+    Action R@5: 29.37% (606/607 valid)
+  Epoch 3 evaluation:
+    Verb R@5:   68.70%
+    Noun R@5:   48.76%
+    Action R@5: 30.53% (606/607 valid)
+
+Participant P31
+  Epoch 1 evaluation:
+    Verb R@5:   77.08%
+    Noun R@5:   54.17%
+    Action R@5: 37.63% (93/96 valid)
+  Epoch 2 evaluation:
+    Verb R@5:   80.21%
+    Noun R@5:   56.25%
+    Action R@5: 47.31% (93/96 valid)
+    New best Action R@5: 47.31%
+  Epoch 3 evaluation:
+    Verb R@5:   81.25%
+    Noun R@5:   59.38%
+    Action R@5: 48.39% (93/96 valid)
+    New best Action R@5: 48.39%
+
+WARNING: baseline_frozen failed on P35: [validation] No valid clips found for participants=['P35']. Check that frames_dir contains participant/video folders: /home/ayoub.sahlaoui/Vjepa2_x_lora/frames
+
+WARNING: baseline_frozen failed on P37: [validation] No valid clips found for participants=['P37']. Check that frames_dir contains participant/video folders: /home/ayoub.sahlaoui/Vjepa2_x_lora/frames
+
+LoRA Results
+============
+
+Run: lora_r4
+------------
+Participant P01
+  Epoch 1 evaluation:
+    Verb R@5:   83.30%
+    Noun R@5:   55.00%
+    Action R@5: 37.46% (865/880 valid)
+  Epoch 2 evaluation:
+    Verb R@5:   84.20%
+    Noun R@5:   54.77%
+    Action R@5: 38.84% (865/880 valid)
+  Epoch 3 evaluation:
+    Verb R@5:   82.84%
+    Noun R@5:   54.89%
+    Action R@5: 40.00% (865/880 valid)
+
+Participant P02
+  Epoch 1 evaluation:
+    Verb R@5:   66.59%
+    Noun R@5:   62.14%
+    Action R@5: 37.91% (430/449 valid)
+  Epoch 2 evaluation:
+    Verb R@5:   67.48%
+    Noun R@5:   62.58%
+    Action R@5: 37.67% (430/449 valid)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Short answer: your baseline is promising as a sanity check, but it is not paper-level comparable yet,
+  and probably below the V-JEPA 2 paper baseline on action anticipation.
+
+  From your results.txt, for baseline_frozen I parsed 30 participants:
+
+  | Metric | Your last-epoch participant mean | V-JEPA 2 ViT-L paper | V-JEPA 2 best paper |
+  |---|---:|---:|---:|
+  | Verb R@5 | 69.68 | 57.8 | 63.6 |
+  | Noun R@5 | 39.39 | 53.8 | 57.1 |
+  | Action R@5 | 24.39 | 32.7 | 39.7 |
+
+  Your valid-sample-weighted Action R@5 estimate is about 29.17%, but that is still not the same metric
+  as the paper.
+
+  The V-JEPA 2 paper reports mean-class Recall@5 on the EK100 validation set. Their Table 5 reports:
+
+  - V-JEPA 2 ViT-L 300M: 57.8 verb / 53.8 noun / 32.7 action
+  - V-JEPA 2 ViT-H 600M: 59.2 / 54.6 / 36.5
+  - V-JEPA 2 ViT-g 1B: 61.2 / 55.7 / 38.0
+  - V-JEPA 2 ViT-g 384: 63.6 / 57.1 / 39.7
+
+  Source: V-JEPA 2 paper, Table 5 and task description:
+  https://ar5iv.labs.arxiv.org/html/2506.09985v1#S6
+
+  The main reason I would not treat your numbers as directly comparable is that your evaluation code
+  computes ordinary sample-level top-5 recall, not mean-class recall. The paper explicitly says EK100
+  uses mean-class Recall@5 because many future actions are possible and the label distribution is long-
+  tailed.
+
+  There are also protocol differences that likely matter:
+  - Paper uses 32 frames at 8 FPS as context; your config uses 64 frames at 60 FPS, roughly a 1-second
+    context window.
+  - Paper’s anticipation probe uses a 4-layer attentive probe with query tokens and focal loss; yours
+    uses a 2-layer transformer probe, mean pooling, and cross entropy.
+  - Your per-participant validation sizes are sometimes tiny, so participants like P17, P14, P31 can
+    swing the average a lot.
+
+  So the practical read is:
+
+  - Verb is high, but probably inflated by sample-level/per-participant evaluation.
+  - Noun is clearly weak versus the paper.
+  - Action is below the closest paper baseline: your rough 24-29% vs paper ViT-L 32.7%.
+  - As a first working baseline, it is not bad. As a claimed reproduction of V-JEPA 2 EK100 numbers, it
+    is not there yet.
+
+  The next thing I’d fix before judging LoRA is the evaluator: implement EK100 mean-class Recall@5 over
+  the full validation set, then rerun the frozen baseline. That will tell you whether the LoRA
+  experiments are improving a real baseline or just moving a non-comparable proxy.
+
+─ Worked for 1m 21s ────────────────────────────────────────────────────────────────────────────────────
+
+
+› okay good im doing a paper about lora applied to jepa   for action anticipation , and i need the data
+  to be paper like , so i need everything to be at its full correctness , now tell me what i should
+  do , no codding jusst the problems that i have to treat , also if there is a way to validate
+  sequentially cuz i have limited space,  explaine everything no coding
+
+
+• Yes. If this is for a paper, the biggest issue is that your current baseline is a useful engineering
+  baseline, but not yet a publishable V-JEPA 2 comparison. You need to tighten the protocol until your
+  numbers mean the same thing as the V-JEPA 2 paper’s numbers.
+
+  The V-JEPA 2 paper reports EK100 action anticipation with mean-class Recall@5 on the full validation
+  set. Their Table 5 reports, for frozen-backbone V-JEPA 2:
+
+  | Model | Verb | Noun | Action |
+  |---|---:|---:|---:|
+  | V-JEPA 2 ViT-L | 57.8 | 53.8 | 32.7 |
+  | V-JEPA 2 ViT-H | 59.2 | 54.6 | 36.5 |
+  | V-JEPA 2 ViT-g | 61.2 | 55.7 | 38.0 |
+  | V-JEPA 2 ViT-g 384 | 63.6 | 57.1 | 39.7 |
+
+  Source: V-JEPA 2 paper, Section 6 / Table 5: https://ar5iv.labs.arxiv.org/html/2506.09985v1#S6
+
+  Problems To Treat
+
+  Your current evaluation metric is not paper-equivalent. You are computing sample-level Recall@5, while
+  the paper uses mean-class Recall@5. This matters a lot on EPIC-KITCHENS because the class distribution
+  is long-tailed. Frequent actions dominate sample-level recall, while mean-class recall gives each
+  class equal weight.
+
+  Your validation set is not stable. In your current pipeline, validation is built from participants
+  whose frames exist on disk at that moment. That means P01 is evaluated on a different validation
+  subset than P20. For a paper, every checkpoint/model must be evaluated on the same fixed validation
+  definition.
+
+  Your baseline is not exactly the V-JEPA 2 protocol. The paper uses 32 frames at 8 FPS, 1-second
+  anticipation, and an attentive probe designed specifically for anticipation. Your config uses 64
+  frames at 60 FPS, which is a much shorter temporal context. That may be valid for your own method, but
+  then you must describe it as your protocol, not a V-JEPA 2 reproduction.
+
+  Your probe architecture differs from the paper. The paper uses an attentive probe with final query
+  tokens for verb, noun, and action. Your current probe uses a transformer encoder plus mean pooling.
+  That is simpler, but it can change results materially.
+
+  Your loss differs. The paper says it uses focal loss for the anticipation probe. You use cross
+  entropy. Again, valid as a design choice, but not a strict reproduction.
+
+  Your training is participant-sequential. That is practical for disk limits, but it introduces order
+  effects. If you train P01, then P02, then P03, the model sees a curriculum grouped by kitchen/person.
+  That is not the same as globally shuffled training over all clips. For a paper, you need either to
+  make this a deliberate method or reduce the bias.
+
+  Your action vocabulary handling needs to be aligned with EK100. Make sure the action label space is
+  exactly the official train action set, and that validation actions unseen in train are handled exactly
+  as the benchmark expects. Do not silently exclude classes unless the official metric does.
+
+  Your baseline result file currently includes failed participants and partial LoRA runs. For paper
+  data, keep clean result tables: one run, one protocol, one complete validation set, one metric
+  implementation.
+
+  What You Should Do
+
+  First, define the official evaluation protocol and freeze it. Decide whether you are reproducing V-
+  JEPA 2 exactly or presenting a modified protocol. If you want paper-like comparison, match the V-JEPA
+  2 setup as closely as possible:
+
+  - EK100 train/validation official split.
+  - 1-second anticipation.
+  - Same frame sampling policy, preferably 32 frames at 8 FPS.
+  - Same input resolution as the model variant you compare against.
+  - Frozen V-JEPA 2 baseline.
+  - Same metric: mean-class Recall@5 for verb, noun, and action.
+  - Full validation set evaluation.
+
+  Second, build one clean frozen baseline. Before LoRA, your frozen V-JEPA 2 baseline should be
+  credible. If your baseline is far below the paper, LoRA improvements become hard to interpret because
+  reviewers will ask whether LoRA helped or whether the baseline was weak.
+
+  Third, decide what your LoRA claim is. Possible paper claims:
+
+  - LoRA improves action anticipation over a frozen V-JEPA 2 probe.
+  - LoRA reaches similar performance with fewer trainable parameters.
+  - Upper-layer LoRA is enough for anticipation adaptation.
+  - Different LoRA ranks trade off performance and memory.
+  - QLoRA enables adaptation under tighter GPU memory.
+
+  Each claim needs a matching experiment table.
+
+  Fourth, report trainable parameters and compute/memory. Since your paper is about LoRA, accuracy alone
+  is not enough. You should report:
+
+  - Total model parameters.
+  - Trainable parameters.
+  - GPU memory.
+  - Batch size.
+  - Training time.
+  - Action R@5.
+  - Verb R@5.
+  - Noun R@5.
+  - Mean and maybe standard deviation across seeds if feasible.
+
+  Fifth, fix validation before running all LoRA experiments. Do not compare LoRA variants using your
+  current per-participant moving validation subset.
+
+  How To Validate Sequentially With Limited Space
+
+  Yes, you can validate sequentially without storing all validation frames at once.
+
+  The correct idea is:
+
+  1. Finish training a model checkpoint.
+  2. Freeze the model for evaluation.
+  3. Iterate through validation participants one by one.
+  4. For each participant, download/extract only that participant’s validation frames.
+  5. Run inference.
+  6. Store only predictions and labels, or update metric accumulators.
+  7. Delete that participant’s frames.
+  8. Move to the next validation participant.
+  9. After all validation participants are processed, compute final mean-class Recall@5.
+
+  This gives you full-validation metrics without needing full-validation frames on disk.
+
+  Important detail: do not average the participant scores. That is not the same as full validation mean-
+  class recall. Instead, collect predictions and labels across all validation clips, then compute the
+  official metric globally.
+
+  For mean-class Recall@5:
+
+  - For each class, compute recall among examples whose ground-truth label is that class.
+  - Then average those per-class recalls.
+  - Do this separately for verb, noun, and action.
+  - Only include classes that have at least one validation example, unless the official EK100 script
+    specifies otherwise.
+
+  For storage, you have two good options:
+
+  - Store raw logits or top-5 predictions per validation clip.
+  - Store per-class counters: number of samples per class and number of top-5 hits per class.
+
+  The second option is tiny and enough for Recall@5. But storing predictions is better for paper work
+  because you can later recompute metrics, debug mistakes, produce confusion analysis, and verify
+  results.
+
+  Training Sequentially Is More Complicated
+
+  Sequential validation is fine because evaluation has no gradient updates.
+
+  Sequential training is more sensitive. If you train participant-by-participant, the model may overfit
+  recent participants or depend on participant order. For a paper, you should either:
+
+  - Present this as a memory-constrained sequential training method, and test multiple participant
+    orders.
+  - Or approximate global shuffling by training in smaller rotating chunks.
+  - Or precompute/download mini-shards, shuffle within each shard, and cycle through participants
+    multiple times.
+
+  If your claim is about LoRA itself, not online/sequential learning, then reviewers will expect a
+  training protocol close to standard full-dataset training. If you cannot do that, be explicit: “Due to
+  storage constraints, training is performed in a participant-streaming regime.”
+
+  Minimum Experiment Set I’d Want Before Writing
+
+  You should aim for this table:
+
+  | Method | Trainable Params | Verb mR@5 | Noun mR@5 | Action mR@5 |
+  |---|---:|---:|---:|---:|
+  | Frozen V-JEPA 2 + probe | X | X | X | X |
+  | LoRA r=4 | X | X | X | X |
+  | LoRA r=8 | X | X | X | X |
+  | LoRA r=16 | X | X | X | X |
+  | LoRA r=32 | X | X | X | X |
+  | Upper-layer LoRA | X | X | X | X |
+  | QLoRA, if working correctly | X | X | X | X |
+
+  Then add one ablation table:
+
+  | Variant | Action mR@5 |
+  |---|---:|
+  | Cross entropy | X |
+  | Focal loss | X |
+  | 2-layer probe | X |
+  | 4-layer probe | X |
+  | Mean pooling | X |
+  | Query-token attentive probe | X |
+
+  That will tell you whether your gains come from LoRA or from changes in the probe/loss.
+
+  Bottom Line
+
+  Before continuing LoRA experiments, fix these in order:
+
+  1. Full validation set, not current-on-disk participants.
+  2. Mean-class Recall@5, not sample-level Recall@5.
+  3. Stable, documented frame sampling.
+  4. Clean frozen V-JEPA 2 baseline.
+  5. Paper-matched probe/loss if you want direct comparison.
+  6. Sequential validation by streaming participants and accumulating global metrics.
+  7. Clear statement about whether training is standard full-data training or memory-constrained
+     participant-streaming.
+
+  Once those are fixed, your LoRA results will be much more defensible.
