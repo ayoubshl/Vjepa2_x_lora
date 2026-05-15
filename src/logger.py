@@ -1,119 +1,102 @@
 """
-Logging — wandb initialization and structured logging.
+Wandb logging — all wandb calls go through this module.
 
-All wandb calls go through this module so the rest of
-the codebase never imports wandb directly.
+# HINT: never call wandb directly from train.py. If wandb is disabled
+# (e.g., offline run), this module no-ops gracefully.
 """
 
-import wandb
+from typing import Dict, Optional
+
+try:
+    import wandb
+    _HAS_WANDB = True
+except ImportError:
+    wandb = None
+    _HAS_WANDB = False
+
+_run = None
 
 
-def init_wandb(global_config, experiment_config):
-    """
-    Initializes a wandb run.
+def init_wandb(global_config: Dict, experiment_config: Dict) -> None:
+    """Initialize a wandb run if wandb is available."""
+    global _run
+    if not _HAS_WANDB:
+        print("[wandb] not installed; logs go to stdout only")
+        return
 
-    Args:
-        global_config:      global.yaml contents
-        experiment_config:  experiment yaml contents (baseline, lora, etc.)
+    wandb_cfg = global_config.get("wandb", {})
+    project = wandb_cfg.get("project", "vjepa2-x-lora")
+    entity = wandb_cfg.get("entity") or None
 
-    Returns:
-        wandb run object
-    """
-    run = wandb.init(
-        project=global_config['wandb']['project'],
-        entity=global_config['wandb'].get('entity'),
-        name=experiment_config['experiment_name'],
-        config=experiment_config,
+    # Combine configs for traceability — wandb will show all hyperparams.
+    full_config = {"global": global_config, "experiment": experiment_config}
+
+    _run = wandb.init(
+        project=project,
+        entity=entity,
+        name=experiment_config.get("experiment_name", "unnamed"),
+        config=full_config,
         resume="allow",
     )
-
-    print(f"wandb initialized: {run.url}")
-    return run
+    print(f"[wandb] initialized: {_run.url}")
 
 
-def log_step(loss_dict, lr, global_step, collapse_metrics=None):
-    """
-    Logs per-batch metrics.
+def _log(d: Dict, step: int) -> None:
+    if _HAS_WANDB and _run is not None:
+        wandb.log(d, step=step)
 
-    Args:
-        loss_dict:         dict from MultiHeadLoss
-        lr:                current learning rate
-        global_step:       total steps so far
-        collapse_metrics:  dict from CollapseMonitor or None
-    """
-    log = {
-        'train/total_loss': loss_dict['total_loss'],
-        'train/verb_loss': loss_dict['verb_loss'],
-        'train/noun_loss': loss_dict['noun_loss'],
-        'train/action_loss': loss_dict['action_loss'],
-        'train/lr': lr,
+
+def log_step(
+    loss_dict: Dict,
+    lr: float,
+    global_step: int,
+    grad_norm: Optional[float] = None,
+    collapse_metrics: Optional[Dict] = None,
+) -> None:
+    payload = {
+        "train/total_loss":  loss_dict["total_loss"],
+        "train/verb_loss":   loss_dict["verb_loss"],
+        "train/noun_loss":   loss_dict["noun_loss"],
+        "train/action_loss": loss_dict["action_loss"],
+        "train/lr":          lr,
     }
-
+    if grad_norm is not None:
+        payload["train/grad_norm"] = grad_norm
     if collapse_metrics is not None:
-        log.update(collapse_metrics)
+        payload.update(collapse_metrics)
+    _log(payload, global_step)
 
-    wandb.log(log, step=global_step)
+
+def log_epoch(
+    epoch: int,
+    avg_loss: float,
+    epoch_time_seconds: float,
+    peak_gpu_mem_bytes: int,
+    global_step: int,
+) -> None:
+    _log({
+        "epoch/avg_loss":      avg_loss,
+        "epoch/seconds":       epoch_time_seconds,
+        "epoch/peak_mem_GB":   peak_gpu_mem_bytes / (1024 ** 3),
+        "epoch":               epoch,
+    }, global_step)
 
 
-def log_epoch(participant_id, epoch, avg_loss, global_step):
+def log_eval(results: Dict, global_step: int, prefix: str = "val") -> None:
     """
-    Logs end-of-epoch summary.
-
-    Args:
-        participant_id:  current participant
-        epoch:           epoch number within participant
-        avg_loss:        average loss over the epoch
-        global_step:     total steps so far
+    Log evaluation results. Only scalars go to wandb; per-class arrays
+    are saved to disk by evaluate() itself.
     """
-    wandb.log({
-        'train/epoch_avg_loss': avg_loss,
-        'train/participant': participant_id,
-        'train/epoch': epoch,
-    }, step=global_step)
+    payload = {}
+    for k, v in results.items():
+        # Skip arrays
+        if hasattr(v, "shape"):
+            continue
+        payload[f"{prefix}/{k}"] = v
+    _log(payload, global_step)
 
 
-def log_eval(results, participant_id, global_step):
-    """
-    Logs evaluation results.
-
-    Args:
-        results:         dict from evaluate()
-        participant_id:  current participant
-        global_step:     total steps so far
-    """
-    wandb.log({
-        'val/verb_r5': results['verb_r5'],
-        'val/noun_r5': results['noun_r5'],
-        'val/action_r5': results['action_r5'],
-        'val/action_n_valid': results['action_n_valid'],
-        'val/action_n_total': results['action_n_total'],
-        'val/participant': participant_id,
-    }, step=global_step)
-
-
-def log_participant_summary(participant_id, results, best_action_r5,
-                            participants_done, total_participants,
-                            global_step):
-    """
-    Logs summary when a participant finishes training.
-
-    Args:
-        participant_id:      completed participant
-        results:             final eval results for this participant
-        best_action_r5:      best Action R@5 across all participants
-        participants_done:   number of participants completed
-        total_participants:  total number of participants
-        global_step:         total steps so far
-    """
-    wandb.log({
-        'progress/participant': participant_id,
-        'progress/participants_done': participants_done,
-        'progress/total_participants': total_participants,
-        'progress/best_action_r5': best_action_r5,
-    }, step=global_step)
-
-
-def finish_wandb():
-    """Closes the wandb run."""
-    wandb.finish()
-    print("wandb run finished")
+def finish() -> None:
+    if _HAS_WANDB and _run is not None:
+        wandb.finish()
+        print("[wandb] run finished")

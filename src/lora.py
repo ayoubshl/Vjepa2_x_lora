@@ -1,221 +1,148 @@
 """
-LoRA and QLoRA setup for V-JEPA 2 encoder.
+LoRA / QLoRA wrapping for V-JEPA 2 encoder.
 
-Applies low-rank adapters to attention layers by manually
-replacing Linear layers with LoRALinear wrappers.
-
-Does NOT use peft's get_peft_model (which fails on VJEPA2Encoder).
-Instead walks the encoder's module tree and injects LoRA directly.
-
-Supports:
-  - Full LoRA (all encoder layers)
-  - Upper-layer LoRA (last N layers only)
-  - QLoRA (4-bit quantized base + LoRA)
+# CRITICAL: this module FAILS LOUDLY if LoRA ends up with zero trainable
+# parameters. The most common LoRA bug is target_modules names that don't
+# match the actual encoder's parameter names — silent and disastrous.
 """
 
-import re
-import torch
+from typing import Dict, List
+
 import torch.nn as nn
+from peft import LoraConfig, get_peft_model
 
 
-# ─── LoRA Layer ─────────────────────────────────────────────────────
-
-class LoRALinear(nn.Module):
+def _list_attention_layer_indices(model: nn.Module) -> List[int]:
     """
-    Wraps a frozen nn.Linear with a parallel low-rank branch.
+    Discover which integer indices correspond to encoder layers.
 
-    out = W_frozen @ x + (B @ A @ x) * (alpha / r)
+    HuggingFace ViT-style encoders have parameters like:
+        encoder.layer.0.attention.attention.query.weight
+        encoder.layer.0.attention.attention.value.weight
+        ...
+        encoder.layer.N-1.attention.attention.query.weight
 
-    Only A and B are trainable. W_frozen is kept intact.
-    B is initialized to zero so LoRA starts as identity.
+    We scan named_parameters to find unique layer indices.
     """
-
-    def __init__(self, linear, r, alpha, dropout=0.0):
-        super().__init__()
-        self.linear = linear
-        self.r = r
-        self.scaling = alpha / r
-
-        in_features = linear.in_features
-        out_features = linear.out_features
-
-        self.lora_A = nn.Linear(in_features, r, bias=False)
-        self.lora_B = nn.Linear(r, out_features, bias=False)
-        self.dropout = nn.Dropout(p=dropout) if dropout > 0 else nn.Identity()
-
-        # Init: A ~ kaiming, B = 0 → LoRA output is zero at start
-        nn.init.kaiming_uniform_(self.lora_A.weight, a=5 ** 0.5)
-        nn.init.zeros_(self.lora_B.weight)
-
-        # Freeze original weights
-        for param in self.linear.parameters():
-            param.requires_grad = False
-
-    def forward(self, x):
-        base = self.linear(x)
-        lora = self.lora_B(self.lora_A(self.dropout(x))) * self.scaling
-        return base + lora
+    indices = set()
+    for name, _ in model.named_parameters():
+        # Look for ".layer.N." patterns
+        if ".layer." in name:
+            parts = name.split(".")
+            try:
+                i = parts.index("layer")
+                idx = int(parts[i + 1])
+                indices.add(idx)
+            except (ValueError, IndexError):
+                continue
+    return sorted(indices)
 
 
-# ─── Module Injection ───────────────────────────────────────────────
-
-def _find_and_replace(model, target_names, lora_r, lora_alpha,
-                      lora_dropout, layer_indices=None):
+def apply_lora(model: nn.Module, config: Dict) -> nn.Module:
     """
-    Walks the encoder module tree and replaces matching Linear
-    layers with LoRALinear.
+    Apply LoRA to the V-JEPA 2 encoder.
 
     Args:
-        model:         V-JEPA 2 model
-        target_names:  list of module name suffixes to target
-                       e.g. ['query', 'value']
-        lora_r:        LoRA rank
-        lora_alpha:    LoRA alpha scaling
-        lora_dropout:  dropout before LoRA branch
-        layer_indices: set of layer indices to target, or None for all
+        model:  V-JEPA 2 model (loaded, all params frozen)
+        config: experiment config dict (the top-level YAML)
 
     Returns:
-        count of replaced modules
+        Same model with LoRA adapters injected.
+
+    # HINT: PEFT's `target_modules` accepts:
+    #   - a list of suffix names (matched against the end of each module name)
+    #   - a regex string
+    #
+    # We use the suffix list form for simplicity. e.g. ["query", "value"]
+    # matches any module whose full name ends with .query or .value.
     """
-    replaced = 0
+    if not config.get("use_lora", False):
+        print("[lora] use_lora=False — encoder stays frozen")
+        return model
 
-    # Walk all named modules in the encoder
-    for name, module in model.encoder.named_modules():
-        if not isinstance(module, nn.Linear):
-            continue
+    lora_cfg = config["lora"]
+    r = int(lora_cfg["r"])
+    alpha = int(lora_cfg.get("alpha", r * 2))
+    dropout = float(lora_cfg.get("dropout", 0.1))
+    target_modules = list(lora_cfg.get("target_modules", ["query", "value"]))
+    bias = str(lora_cfg.get("bias", "none"))
+    upper_only = bool(lora_cfg.get("upper_layers_only", False))
+    num_upper = int(lora_cfg.get("num_upper_layers", 6))
 
-        # Check if this module's name ends with a target name
-        short_name = name.split('.')[-1]
-        if short_name not in target_names:
-            continue
-
-        # Check layer index if upper-layers-only mode
-        if layer_indices is not None:
-            layer_match = re.search(r'layer\.(\d+)', name)
-            if layer_match:
-                idx = int(layer_match.group(1))
-                if idx not in layer_indices:
-                    continue
-
-        # Get device of the original module
-        device = next(module.parameters()).device
-
-        # Replace the module — move LoRA weights to same device
-        lora_module = LoRALinear(
-            linear=module,
-            r=lora_r,
-            alpha=lora_alpha,
-            dropout=lora_dropout,
-        ).to(device)
-
-        # Navigate to parent and replace
-        parts = name.split('.')
-        parent = model.encoder
-        for part in parts[:-1]:
-            parent = getattr(parent, part)
-        setattr(parent, parts[-1], lora_module)
-
-        replaced += 1
-
-    return replaced
-
-
-# ─── Public API ─────────────────────────────────────────────────────
-
-def apply_lora(model, config):
-    """
-    Applies LoRA to V-JEPA 2 encoder attention layers.
-
-    Args:
-        model:  V-JEPA 2 model (already frozen)
-        config: experiment config dict with lora settings
-
-    Returns:
-        model with LoRA applied to encoder
-    """
-    lora_r = int(config['lora_r'])
-    lora_alpha = int(config.get('lora_alpha', lora_r * 2))
-    lora_dropout = float(config.get('lora_dropout', 0.1))
-    target_modules = config.get('lora_target_modules', ['query', 'value'])
-
-    # Upper layers only mode
-    layer_indices = None
-    upper_only = config.get('lora_upper_layers_only', False)
+    # Upper-layers-only: restrict to the last N encoder layers using a regex.
     if upper_only:
-        num_upper = int(config.get('lora_num_upper_layers', 6))
-        total_layers = model.config.num_hidden_layers
-        start_layer = total_layers - num_upper
-        layer_indices = set(range(start_layer, total_layers))
+        all_layer_idx = _list_attention_layer_indices(model)
+        if not all_layer_idx:
+            raise RuntimeError(
+                "[lora] upper_layers_only=True but no encoder layers detected "
+                "via .layer.N. pattern. Run scripts/inspect_model.py."
+            )
+        total = max(all_layer_idx) + 1
+        start = max(0, total - num_upper)
+        upper_idx = list(range(start, total))
+        # Build a regex that matches ".layer.{i}." for i in upper_idx,
+        # followed by anything, ending in any of the target_modules.
+        idx_alt = "|".join(str(i) for i in upper_idx)
+        mod_alt = "|".join(target_modules)
+        target_modules = rf".*\.layer\.({idx_alt})\..*\.({mod_alt})$"
+        print(
+            f"[lora] upper_layers_only: layers {start}..{total - 1} "
+            f"({num_upper}/{total}) | regex={target_modules}"
+        )
 
-        print(f"LoRA upper layers only: layers {start_layer}-"
-              f"{total_layers - 1} ({num_upper}/{total_layers} layers)")
-
-    count = _find_and_replace(
-        model=model,
-        target_names=target_modules,
-        lora_r=lora_r,
-        lora_alpha=lora_alpha,
-        lora_dropout=lora_dropout,
-        layer_indices=layer_indices,
+    lora_config = LoraConfig(
+        r=r,
+        lora_alpha=alpha,
+        target_modules=target_modules,
+        lora_dropout=dropout,
+        bias=bias,
     )
 
-    # Count trainable params
-    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    total = sum(p.numel() for p in model.parameters())
+    model = get_peft_model(model, lora_config)
 
-    print(f"LoRA applied (r={lora_r}, alpha={lora_alpha}):")
-    print(f"  Replaced {count} Linear layers with LoRALinear")
-    print(f"  Trainable: {trainable / 1e6:.2f}M / {total / 1e6:.1f}M "
-          f"({100 * trainable / total:.2f}%)")
+    # CRITICAL CHECK: trainable params MUST be > 0.
+    n_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    n_total = sum(p.numel() for p in model.parameters())
+    pct = 100.0 * n_train / n_total
+
+    print(f"[lora] r={r} alpha={alpha} dropout={dropout}")
+    print(f"[lora] trainable: {n_train / 1e6:.3f}M / {n_total / 1e6:.1f}M ({pct:.3f}%)")
+
+    if n_train == 0:
+        # Failed silently — dump the encoder's parameter names so the user
+        # can see what to put in target_modules.
+        print("[lora] ERROR — zero trainable params! Likely causes:")
+        print("  1. target_modules names don't match this model's modules")
+        print("  2. Encoder uses a different naming scheme (q_proj, qkv, etc.)")
+        print("")
+        print("[lora] Sample of encoder parameter names (look for q/k/v):")
+        names = [n for n, _ in model.named_parameters()]
+        attn_names = [n for n in names if "attn" in n.lower() or "query" in n.lower()
+                      or "q_proj" in n or "qkv" in n]
+        for n in attn_names[:30]:
+            print(f"        {n}")
+        raise RuntimeError("LoRA produced zero trainable parameters. See above.")
 
     return model
 
 
-def apply_qlora(model, config):
+def setup_encoder_treatment(model: nn.Module, config: Dict) -> nn.Module:
     """
-    Applies QLoRA: 4-bit quantized base model + LoRA adapters.
-    Requires bitsandbytes library.
+    Top-level entry point used by train.py.
 
-    Note: the model must be loaded with quantization config
-    BEFORE calling this. This function handles the LoRA part.
-
-    Args:
-        model:  V-JEPA 2 model (loaded with 4-bit quantization)
-        config: experiment config dict
-
-    Returns:
-        model with QLoRA applied
+    Decides: frozen (no LoRA), LoRA, or QLoRA.
+    QLoRA quantization is applied at MODEL LOAD time (see src/model.py).
+    Here we just attach LoRA adapters on top of the (possibly quantized) model.
     """
-    try:
-        import bitsandbytes  # noqa: F401
-    except ImportError:
-        raise ImportError(
-            "QLoRA requires bitsandbytes. "
-            "Install with: pip install bitsandbytes"
-        )
-
-    # QLoRA uses the same LoRA injection on a quantized model
-    return apply_lora(model, config)
-
-
-def setup_lora(model, config):
-    """
-    Main entry point. Decides which LoRA variant to apply.
-
-    Args:
-        model:  V-JEPA 2 model
-        config: experiment config dict
-
-    Returns:
-        model with appropriate LoRA variant applied
-    """
-    if not config.get('use_lora', False):
-        print("No LoRA — encoder stays frozen")
-        return model
-
-    if config.get('use_qlora', False):
-        print("Applying QLoRA...")
-        return apply_qlora(model, config)
-    else:
-        print("Applying LoRA...")
+    if config.get("use_qlora", False):
+        # Quantization already done at load time; LoRA on top works the same.
+        # bitsandbytes-compatible PEFT integration is automatic.
+        print("[encoder] applying LoRA on top of 4-bit quantized base (QLoRA)")
         return apply_lora(model, config)
+
+    if config.get("use_lora", False):
+        print("[encoder] applying standard LoRA")
+        return apply_lora(model, config)
+
+    print("[encoder] no adapter — encoder remains fully frozen")
+    return model

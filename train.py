@@ -1,348 +1,327 @@
 """
-Per-participant training loop.
+Main training loop.
 
-Trains for N epochs on one participant's data.
-Model, optimizer, scheduler carry over between participants.
-
-Uses thread-local storage so parallel threads on different GPUs
-each have their own independent model, optimizer, and state.
+# Single global training run over the full fixed dataset. No participant
+# streaming. Same data, same probe, same loss across all experiments —
+# only the encoder treatment changes (frozen / LoRA / QLoRA).
+#
+# Pipeline:
+#   1. Load config, set seed, init wandb
+#   2. Build vocabulary (or load if cached)
+#   3. Build dataloaders for train and validation
+#   4. Load V-JEPA 2 (frozen by default; QLoRA quantizes here)
+#   5. Apply LoRA if configured (paper claim: trainable param count > 0)
+#   6. Build probe (paper-matched: 4 blocks, 16 heads, 3 query tokens)
+#   7. Build optimizer + scheduler + loss
+#   8. Train for N epochs; checkpoint each epoch
+#   9. Final mean-class R@5 evaluation on full validation set
 """
 
 import os
+import subprocess
 import time
-import threading
+from typing import Dict, List
+
 import torch
-import pandas as pd
+import yaml
 from tqdm import tqdm
 
-from src.model import load_model, extract_features, get_feature_dim
+from src.seed import set_seed
+from src.vocabulary import build_action_vocabulary, load_action_vocabulary
+from src.dataset import build_dataloader
+from src.model import load_vjepa2, extract_features, get_feature_dims
 from src.probe import build_probe
-from src.lora import setup_lora
+from src.lora import setup_encoder_treatment
 from src.losses import build_loss
 from src.optimizer import build_optimizer, build_scheduler
 from src.monitor import CollapseMonitor
 from src.evaluate import evaluate
 from src.checkpoint import save_checkpoint, load_checkpoint
-from src.dataset import build_dataloader
-from src.vocabulary import load_action_vocabulary
 from src import logger
 
 
-# Thread-local storage — each thread gets its own model, probe, etc.
-_local = threading.local()
+def _git_hash() -> str:
+    """Best-effort current git hash for reproducibility."""
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], text=True
+        ).strip()
+    except Exception:
+        return "unknown"
 
 
-def _is_initialized():
-    """Check if this thread has been initialized."""
-    return getattr(_local, 'initialized', False)
+def _read_participants_file(path: str) -> List[str]:
+    """Read participants.txt — one ID per line. Empty / commented lines ok."""
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f"participants_file not found: {path}\n"
+            f"Create this file with one participant ID per line (e.g. P01)."
+        )
+    parts = []
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts.append(line)
+    return parts
 
 
-def _count_participants(train_csv):
-    """Counts unique training participants without touching pipeline state."""
-    df = pd.read_csv(train_csv, usecols=['participant_id'])
-    return df['participant_id'].nunique()
-
-
-def _initialize(global_config, experiment_config, action_to_id,
-                num_actions):
+def train(global_config: Dict, experiment_config: Dict) -> None:
     """
-    One-time initialization: loads model, builds probe, optimizer,
-    scheduler, loss, and restores from checkpoint if available.
-    Called once per thread on the first participant, then cached.
-    """
-    if _is_initialized():
-        return
-
-    paths = global_config['paths']
-    pipeline = global_config['pipeline']
-    dataset_cfg = global_config['dataset']
-    device = torch.device(pipeline['device'])
-
-    # Initialize wandb
-    logger.init_wandb(global_config, experiment_config)
-
-    # Load model — each thread loads its own independent copy
-    hf_repo = global_config['model']['hf_repo']
-    model, processor = load_model(hf_repo, device)
-
-    # Apply LoRA if configured
-    model = setup_lora(model, experiment_config)
-
-    # Build probe
-    feature_dim = get_feature_dim(model)
-    probe = build_probe(
-        feature_dim=feature_dim,
-        num_action_classes=num_actions,
-        num_verb_classes=int(dataset_cfg['num_verb_classes']),
-        num_noun_classes=int(dataset_cfg['num_noun_classes']),
-        num_layers=int(experiment_config.get('probe_layers', 2)),
-        num_heads=int(experiment_config.get('probe_heads', 8)),
-        dropout=float(experiment_config.get('probe_dropout', 0.1)),
-    ).to(device)
-
-    # Build optimizer
-    optimizer, trainable_params = build_optimizer(
-        model, probe, experiment_config
-    )
-
-    # Estimate scheduler steps
-    num_participants = _count_participants(
-        os.path.expanduser(paths['train_csv'])
-    )
-
-    # Rough estimate: ~1000 clips per participant, / batch_size
-    batch_size = int(experiment_config['batch_size'])
-    estimated_steps_per_epoch = 1000 // batch_size
-    scheduler = build_scheduler(
-        optimizer, experiment_config,
-        estimated_steps_per_epoch, num_participants
-    )
-
-    # Build loss
-    loss_fn = build_loss(experiment_config)
-
-    # Monitor
-    monitor = CollapseMonitor(log_every=50)
-
-    # Try to load checkpoint
-    checkpoints_dir = os.path.expanduser(
-        os.path.join(paths['checkpoints_dir'],
-                     experiment_config['experiment_name'])
-    )
-    ckpt_info = load_checkpoint(
-        checkpoints_dir, model, probe, optimizer, scheduler, device
-    )
-
-    global_step = 0
-    best_action_r5 = 0.0
-    history = {}
-    participants_trained = []
-    total_train_time = 0.0
-
-    if ckpt_info is not None:
-        global_step = ckpt_info['global_step']
-        best_action_r5 = ckpt_info['best_action_r5']
-        history = ckpt_info['history']
-        participants_trained = ckpt_info['participants_trained']
-        total_train_time = ckpt_info['total_train_time']
-
-    # Cache in thread-local storage
-    _local.model = model
-    _local.probe = probe
-    _local.optimizer = optimizer
-    _local.scheduler = scheduler
-    _local.loss_fn = loss_fn
-    _local.monitor = monitor
-    _local.processor = processor
-    _local.global_step = global_step
-    _local.best_action_r5 = best_action_r5
-    _local.history = history
-    _local.participants_trained = participants_trained
-    _local.total_train_time = total_train_time
-    _local.initialized = True
-
-    print("\nInitialization complete")
-
-
-def train_on_participant(participant_id, global_config,
-                         experiment_config, action_to_id,
-                         num_actions):
-    """
-    Trains on a single participant's data.
-
-    The model, optimizer, and scheduler carry over from
-    previous participants — this is a continuous training run.
+    Main training entry point.
 
     Args:
-        participant_id:     e.g. 'P01'
-        global_config:      parsed global.yaml
-        experiment_config:  parsed experiment yaml
-        action_to_id:       vocabulary dict
-        num_actions:        number of action classes
+        global_config:     parsed configs/global.yaml
+        experiment_config: parsed configs/<experiment>.yaml
     """
-    # Initialize on first call (per thread)
-    _initialize(global_config, experiment_config, action_to_id,
-                num_actions)
+    paths = {k: os.path.expanduser(v) for k, v in global_config["paths"].items()}
+    runtime = global_config["runtime"]
+    dataset_cfg = global_config["dataset"]
+    train_cfg = experiment_config["training"]
+    probe_cfg = experiment_config["probe"]
 
-    paths = global_config['paths']
-    pipeline = global_config['pipeline']
-    dataset_cfg = global_config['dataset']
-    device = torch.device(pipeline['device'])
+    exp_name = experiment_config["experiment_name"]
+    checkpoints_dir = os.path.join(paths["checkpoints_dir"], exp_name)
+    predictions_dir = os.path.join(paths["predictions_dir"], exp_name)
+    os.makedirs(checkpoints_dir, exist_ok=True)
+    os.makedirs(predictions_dir, exist_ok=True)
 
-    model = _local.model
-    probe = _local.probe
-    optimizer = _local.optimizer
-    scheduler = _local.scheduler
-    loss_fn = _local.loss_fn
-    monitor = _local.monitor
-    processor = _local.processor
+    # ----- 1. Seed + wandb -----
+    seed = int(runtime.get("seed", 42))
+    deterministic = bool(runtime.get("deterministic", False))
+    set_seed(seed, deterministic=deterministic)
+    logger.init_wandb(global_config, experiment_config)
+    git_hash = _git_hash()
+    print(f"[run] git_hash={git_hash} seed={seed} deterministic={deterministic}")
 
-    epochs = int(experiment_config['epochs_per_participant'])
-    eval_every = int(experiment_config.get('eval_every_n_epochs', 1))
-    max_grad_norm = float(experiment_config.get('max_grad_norm', 1.0))
-    use_bf16 = bool(experiment_config.get('use_bf16', True))
-    batch_size = int(experiment_config['batch_size'])
-    fps = int(dataset_cfg['fps'])
-    anticipation_s = float(dataset_cfg['anticipation_seconds'])
-    num_frames = int(dataset_cfg['num_frames'])
-
-    checkpoints_dir = os.path.expanduser(
-        os.path.join(paths['checkpoints_dir'],
-                     experiment_config['experiment_name'])
+    device = torch.device(
+        runtime["device"] if torch.cuda.is_available() else "cpu"
     )
 
-    # Build train dataloader for this participant only
+    # ----- 2. Vocabulary (built from FULL train CSV, not subset) -----
+    if os.path.exists(paths["vocabulary_path"]):
+        action_to_id, num_actions = load_action_vocabulary(paths["vocabulary_path"])
+    else:
+        action_to_id, num_actions = build_action_vocabulary(
+            train_csv=paths["train_csv"],
+            save_path=paths["vocabulary_path"],
+        )
+
+    # ----- 3. Participant subset -----
+    participants = _read_participants_file(paths["participants_file"])
+    print(f"[run] participants ({len(participants)}): {participants}")
+
+    # ----- 4. Load model (FIRST, before dataloaders, so processor is ready) -----
+    use_qlora = bool(experiment_config.get("use_qlora", False))
+    model, processor = load_vjepa2(
+        global_config["model"]["hf_repo"], device, use_qlora=use_qlora,
+    )
+    enc_dim, pred_dim = get_feature_dims(model)
+
+    # ----- 5. Encoder treatment (frozen / LoRA / QLoRA) -----
+    model = setup_encoder_treatment(model, experiment_config)
+
+    # ----- 6. Probe -----
+    probe = build_probe(
+        encoder_dim=enc_dim,
+        predictor_dim=pred_dim,
+        num_action_classes=num_actions,
+        num_verb_classes=int(dataset_cfg["num_verb_classes"]),
+        num_noun_classes=int(dataset_cfg["num_noun_classes"]),
+        depth=int(probe_cfg["depth"]),
+        num_heads=int(probe_cfg["num_heads"]),
+        mlp_ratio=float(probe_cfg.get("mlp_ratio", 4.0)),
+        dropout=float(probe_cfg.get("dropout", 0.0)),
+    ).to(device)
+
+    # ----- 7. Dataloaders -----
     train_loader = build_dataloader(
-        csv_path=os.path.expanduser(paths['train_csv']),
-        frames_dir=os.path.expanduser(paths['frames_dir']),
+        csv_path=paths["train_csv"],
+        videos_dir=paths["videos_dir"],
         action_to_id=action_to_id,
-        participants=[participant_id],
+        participants=participants,
         processor=processor,
-        batch_size=batch_size,
-        fps=fps,
-        anticipation_s=anticipation_s,
-        num_frames=num_frames,
-        split='train',
+        batch_size=int(train_cfg["batch_size"]),
+        num_workers=int(runtime["num_workers"]),
+        fps_source=int(dataset_cfg["fps_source"]),
+        fps_target=int(dataset_cfg["fps_target"]),
+        num_frames=int(dataset_cfg["num_frames"]),
+        anticipation_s=float(dataset_cfg["anticipation_seconds"]),
+        split="train",
+        cache_dir=paths["annotation_cache_dir"],
     )
 
-    # Build val dataloader — uses ALL participants whose frames exist
-    val_participants = [
-        p for p in os.listdir(os.path.expanduser(paths['frames_dir']))
-        if os.path.isdir(os.path.join(
-            os.path.expanduser(paths['frames_dir']), p
-        ))
-    ]
+    # Validation: use the same participant subset (we only have these on disk)
     val_loader = build_dataloader(
-        csv_path=os.path.expanduser(paths['val_csv']),
-        frames_dir=os.path.expanduser(paths['frames_dir']),
+        csv_path=paths["val_csv"],
+        videos_dir=paths["videos_dir"],
         action_to_id=action_to_id,
-        participants=val_participants if val_participants else None,
+        participants=participants,
         processor=processor,
-        batch_size=batch_size,
-        fps=fps,
-        anticipation_s=anticipation_s,
-        num_frames=num_frames,
-        split='validation',
+        batch_size=int(train_cfg["batch_size"]),
+        num_workers=int(runtime["num_workers"]),
+        fps_source=int(dataset_cfg["fps_source"]),
+        fps_target=int(dataset_cfg["fps_target"]),
+        num_frames=int(dataset_cfg["num_frames"]),
+        anticipation_s=float(dataset_cfg["anticipation_seconds"]),
+        split="validation",
+        cache_dir=paths["annotation_cache_dir"],
     )
 
-    # Collect trainable params for grad clipping
-    trainable_params = [p for p in list(model.parameters())
-                        + list(probe.parameters()) if p.requires_grad]
+    # ----- 8. Optimizer + scheduler + loss -----
+    optimizer, trainable_params = build_optimizer(model, probe, experiment_config)
+    scheduler = build_scheduler(optimizer, experiment_config, len(train_loader))
+    loss_fn = build_loss(experiment_config["loss"])
+    monitor = CollapseMonitor(log_every=50)
 
-    # GradScaler for mixed precision
-    scaler = torch.amp.GradScaler('cuda', enabled=use_bf16)
+    use_bf16 = bool(train_cfg.get("use_bf16", True))
+    max_grad_norm = float(experiment_config["optimizer"].get("max_grad_norm", 1.0))
+    num_epochs = int(train_cfg["num_epochs"])
+    eval_mid = bool(train_cfg.get("eval_mid_training", False))
+    eval_at_end = bool(train_cfg.get("eval_at_end", True))
 
-    # Initialize history for this participant
-    if participant_id not in _local.history:
-        _local.history[participant_id] = {}
+    # HINT: GradScaler for fp16 grad scaling. For bf16, scaler is a no-op
+    # but we still wire it the same way for code uniformity.
+    scaler = torch.amp.GradScaler("cuda", enabled=False)  # bf16 doesn't need it
 
-    participant_start_time = time.time()
+    # ----- 9. Resume if checkpoint exists -----
+    ckpt = load_checkpoint(checkpoints_dir, model, probe, optimizer, scheduler, device=device)
+    start_epoch = 1
+    global_step = 0
+    history: List[Dict] = []
+    best_action_mR5 = 0.0
+    total_train_time = 0.0
+    if ckpt is not None:
+        start_epoch = ckpt["epoch"] + 1
+        global_step = ckpt["global_step"]
+        history = ckpt.get("history", [])
+        best_action_mR5 = ckpt.get("best_action_mR5", 0.0)
+        total_train_time = ckpt.get("total_train_time", 0.0)
+        print(f"[run] resumed: starting at epoch {start_epoch}")
 
-    # Training loop
-    for epoch in range(1, epochs + 1):
+    # ----- 10. Training loop -----
+    print(f"\n{'=' * 70}\nTRAINING: {exp_name}\n{'=' * 70}")
+    torch.cuda.reset_peak_memory_stats(device)
+    overall_start = time.time()
+
+    for epoch in range(start_epoch, num_epochs + 1):
         model.train()
         probe.train()
 
         epoch_loss = 0.0
-        epoch_verb_loss = 0.0
-        epoch_noun_loss = 0.0
-        epoch_action_loss = 0.0
+        epoch_v = 0.0
+        epoch_n = 0.0
+        epoch_a = 0.0
         num_batches = 0
+        epoch_start = time.time()
 
-        progress = tqdm(
-            train_loader,
-            desc=f"{participant_id} epoch {epoch}/{epochs}"
-        )
+        pbar = tqdm(train_loader, desc=f"epoch {epoch}/{num_epochs}")
+        for batch in pbar:
+            frames = batch["frames"].to(device, non_blocking=True)
+            v_lab = batch["verb_label"].to(device, non_blocking=True)
+            n_lab = batch["noun_label"].to(device, non_blocking=True)
+            a_lab = batch["action_label"].to(device, non_blocking=True)
 
-        for batch in progress:
-            frames = batch['frames'].to(device)
-            verb_labels = batch['verb_label'].to(device)
-            noun_labels = batch['noun_label'].to(device)
-            action_labels = batch['action_label'].to(device)
-
-            with torch.amp.autocast('cuda', dtype=torch.bfloat16,
-                                     enabled=use_bf16):
-                features = extract_features(model, frames)
-                verb_logits, noun_logits, action_logits = probe(features)
-
+            with torch.amp.autocast("cuda", dtype=torch.bfloat16, enabled=use_bf16):
+                enc_feat, pred_feat = extract_features(model, frames)
+                v_log, n_log, a_log = probe(enc_feat, pred_feat)
                 total_loss, loss_dict = loss_fn(
-                    verb_logits, noun_logits, action_logits,
-                    verb_labels, noun_labels, action_labels
+                    v_log, n_log, a_log, v_lab, n_lab, a_lab,
                 )
 
-            optimizer.zero_grad()
-            scaler.scale(total_loss).backward()
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(trainable_params,
-                                            max_norm=max_grad_norm)
-            scaler.step(optimizer)
-            scaler.update()
+            optimizer.zero_grad(set_to_none=True)
+            total_loss.backward()
+
+            # Gradient clipping
+            grad_norm = torch.nn.utils.clip_grad_norm_(
+                trainable_params, max_norm=max_grad_norm
+            ).item()
+
+            optimizer.step()
             scheduler.step()
 
-            # Collapse monitoring
-            collapse_metrics = monitor.update(
-                features.detach().float().mean(dim=1)
+            # Collapse monitor (mean-pool encoder features over tokens)
+            with torch.no_grad():
+                features_for_monitor = enc_feat.detach().float().mean(dim=1)
+            collapse_metrics = monitor.update(features_for_monitor)
+
+            global_step += 1
+            current_lr = scheduler.get_last_lr()[0]
+            logger.log_step(
+                loss_dict=loss_dict,
+                lr=current_lr,
+                global_step=global_step,
+                grad_norm=grad_norm,
+                collapse_metrics=collapse_metrics,
             )
 
-            # Logging
-            _local.global_step += 1
-            current_lr = scheduler.get_last_lr()[0]
-            logger.log_step(loss_dict, current_lr,
-                           _local.global_step, collapse_metrics)
-
-            epoch_loss += loss_dict['total_loss']
-            epoch_verb_loss += loss_dict['verb_loss']
-            epoch_noun_loss += loss_dict['noun_loss']
-            epoch_action_loss += loss_dict['action_loss']
+            epoch_loss += loss_dict["total_loss"]
+            epoch_v += loss_dict["verb_loss"]
+            epoch_n += loss_dict["noun_loss"]
+            epoch_a += loss_dict["action_loss"]
             num_batches += 1
+            pbar.set_postfix({"loss": f"{loss_dict['total_loss']:.3f}"})
 
-            progress.set_postfix({'loss': f"{loss_dict['total_loss']:.4f}"})
-
-        # End of epoch
+        epoch_time = time.time() - epoch_start
+        total_train_time += epoch_time
         avg_loss = epoch_loss / max(1, num_batches)
-        avg_verb = epoch_verb_loss / max(1, num_batches)
-        avg_noun = epoch_noun_loss / max(1, num_batches)
-        avg_action = epoch_action_loss / max(1, num_batches)
+        peak_mem = torch.cuda.max_memory_allocated(device)
+        print(
+            f"[epoch {epoch}] avg_loss={avg_loss:.4f}  "
+            f"v={epoch_v / max(1, num_batches):.4f}  "
+            f"n={epoch_n / max(1, num_batches):.4f}  "
+            f"a={epoch_a / max(1, num_batches):.4f}  "
+            f"time={epoch_time:.0f}s  peak_mem={peak_mem / 1e9:.2f}GB"
+        )
+        logger.log_epoch(
+            epoch=epoch,
+            avg_loss=avg_loss,
+            epoch_time_seconds=epoch_time,
+            peak_gpu_mem_bytes=peak_mem,
+            global_step=global_step,
+        )
 
-        logger.log_epoch(participant_id, epoch, avg_loss,
-                        _local.global_step)
-
-        print(f"{participant_id} epoch {epoch} — "
-              f"avg loss: {avg_loss:.4f}")
-
-        # Evaluation
+        # Mid-training eval (optional, at midpoint and end)
         results = None
-        if epoch % eval_every == 0 or epoch == epochs:
-            print(f"\n{participant_id} epoch {epoch} evaluation:")
-            results = evaluate(model, probe, val_loader, device)
-            results['avg_loss'] = avg_loss
+        is_midpoint = eval_mid and epoch == max(1, num_epochs // 2)
+        is_end = epoch == num_epochs
+        if is_midpoint or (is_end and eval_at_end):
+            print(f"\n[epoch {epoch}] running validation…")
+            save_path = os.path.join(predictions_dir, f"epoch{epoch}.pt")
+            results = evaluate(
+                model=model,
+                probe=probe,
+                dataloader=val_loader,
+                device=device,
+                use_bf16=use_bf16,
+                save_predictions_path=save_path,
+                log_prefix=f"val_e{epoch}",
+            )
+            logger.log_eval(results, global_step=global_step, prefix="val")
+            if results["action_mR5"] > best_action_mR5:
+                best_action_mR5 = results["action_mR5"]
+                print(f"[epoch {epoch}] NEW BEST action mR@5: {best_action_mR5:.2f}%")
 
-            logger.log_eval(results, participant_id,
-                           _local.global_step)
-
-            if results['action_r5'] > _local.best_action_r5:
-                _local.best_action_r5 = results['action_r5']
-                print(f"New best Action R@5: "
-                      f"{_local.best_action_r5:.2f}%")
-
-        # Save epoch history
-        _local.history[participant_id][f'epoch_{epoch}'] = {
-            'avg_loss': avg_loss,
-            'verb_loss': avg_verb,
-            'noun_loss': avg_noun,
-            'action_loss': avg_action,
-            'lr': current_lr,
-            'num_clips': len(train_loader.dataset),
-            'verb_r5': results['verb_r5'] if results else None,
-            'noun_r5': results['noun_r5'] if results else None,
-            'action_r5': results['action_r5'] if results else None,
+        # Per-epoch history entry
+        history_entry = {
+            "epoch":            epoch,
+            "avg_loss":         avg_loss,
+            "avg_verb_loss":    epoch_v / max(1, num_batches),
+            "avg_noun_loss":    epoch_n / max(1, num_batches),
+            "avg_action_loss":  epoch_a / max(1, num_batches),
+            "lr":               current_lr,
+            "epoch_time":       epoch_time,
+            "peak_mem_bytes":   peak_mem,
+            "num_clips":        len(train_loader.dataset),
         }
+        if results is not None:
+            history_entry["verb_mR5"]   = results["verb_mR5"]
+            history_entry["noun_mR5"]   = results["noun_mR5"]
+            history_entry["action_mR5"] = results["action_mR5"]
+        history.append(history_entry)
 
-        # Update total training time
-        _local.total_train_time += time.time() - participant_start_time
-        participant_start_time = time.time()
-
-        # Save checkpoint
+        # Checkpoint at end of every epoch
         save_checkpoint(
             save_dir=checkpoints_dir,
             model=model,
@@ -350,29 +329,23 @@ def train_on_participant(participant_id, global_config,
             optimizer=optimizer,
             scheduler=scheduler,
             config=experiment_config,
-            participant_id=participant_id,
             epoch=epoch,
-            global_step=_local.global_step,
-            results=results,
-            best_action_r5=_local.best_action_r5,
-            participants_trained=_local.participants_trained,
-            total_train_time=_local.total_train_time,
-            history=_local.history,
+            global_step=global_step,
+            history=history,
+            best_action_mR5=best_action_mR5,
+            peak_gpu_mem_bytes=peak_mem,
+            total_train_time=total_train_time,
+            git_hash=git_hash,
+            extra={"participants": participants, "seed": seed},
         )
 
-    # Mark participant as trained
-    _local.participants_trained.append(participant_id)
-
-    logger.log_participant_summary(
-        participant_id=participant_id,
-        results=results,
-        best_action_r5=_local.best_action_r5,
-        participants_done=len(_local.participants_trained),
-        total_participants=_count_participants(
-            os.path.expanduser(paths['train_csv'])
-        ),
-        global_step=_local.global_step,
-    )
-
-    print(f"\n{participant_id} training complete "
-          f"({epochs} epochs)")
+    # ----- 11. Done -----
+    total_wall = time.time() - overall_start
+    print(f"\n{'=' * 70}")
+    print(f"DONE: {exp_name}")
+    print(f"  best action mR@5  : {best_action_mR5:.2f}%")
+    print(f"  total train time  : {total_train_time:.0f}s ({total_train_time / 60:.1f}m)")
+    print(f"  wall-clock total  : {total_wall:.0f}s ({total_wall / 60:.1f}m)")
+    print(f"  peak GPU memory   : {torch.cuda.max_memory_allocated(device) / 1e9:.2f}GB")
+    print(f"{'=' * 70}\n")
+    logger.finish()

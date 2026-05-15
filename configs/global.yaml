@@ -1,38 +1,45 @@
 # ============================================================
 # Global config — shared across all experiments
+# Paths and dataset-level constants. Experiment YAMLs override
+# only experiment-specific fields.
 # ============================================================
 
-# Paths 
+# Paths
 paths:
-  project_dir: ~/Vjepa2_x_lora
-  frames_dir: ~/Vjepa2_x_lora/frames
-  annotations_dir: ~/Vjepa2_x_lora/annotations
-  train_csv: ~/Vjepa2_x_lora/annotations/EPIC_100_train.csv
-  val_csv: ~/Vjepa2_x_lora/annotations/EPIC_100_validation.csv
-  checkpoints_dir: ~/Vjepa2_x_lora/checkpoints
-  results_dir: ~/Vjepa2_x_lora/results
-  vocabulary_path: ~/Vjepa2_x_lora/vocabulary.json
-  downloader_dir: ~/Vjepa2_x_lora/download
+  project_dir:      ~/Vjepa2_x_lora
+  videos_dir:       ~/Vjepa2_x_lora/videos          # raw MP4 files
+  annotations_dir:  ~/Vjepa2_x_lora/annotations
+  train_csv:        ~/Vjepa2_x_lora/annotations/EPIC_100_train.csv
+  val_csv:          ~/Vjepa2_x_lora/annotations/EPIC_100_validation.csv
+  participants_file: ~/Vjepa2_x_lora/participants.txt   # fixed subset list
+  checkpoints_dir:  ~/Vjepa2_x_lora/checkpoints
+  predictions_dir:  ~/Vjepa2_x_lora/predictions     # raw logits per experiment
+  results_dir:      ~/Vjepa2_x_lora/results
+  vocabulary_path:  ~/Vjepa2_x_lora/vocabulary.json
+  annotation_cache_dir: ~/Vjepa2_x_lora/annotation_cache  # parsed CSV pickles
 
-# V-JEPA 2 model from HuggingFace
-# hidden_size and pred_hidden_size are read from model.config at runtime
+# V-JEPA 2 model
+# Hidden sizes are read from model.config at runtime
 model:
   hf_repo: facebook/vjepa2-vitl-fpc64-256
 
-# EK-100 constants
+# frame sampling 
 dataset:
-  fps: 60
-  anticipation_seconds: 1.0
-  num_frames: 64
-  num_verb_classes: 97
-  num_noun_classes: 300
+  fps_source:           60      # EK-100 native frame rate
+  fps_target:           8       
+  num_frames:           32      
+  anticipation_seconds: 1.0     # context ends 1 second before action
+  resolution:           256     # ViT-L is fpc64-256
+  num_verb_classes:     97      # EK-100
+  num_noun_classes:     300     # EK-100
 
-# Pipeline settings
-pipeline:
-  max_participants_on_disk: 3
-  device: cuda:0
-
+# Hardware
+runtime:
+  device:        cuda:0
+  num_workers:   4       # Decord DataLoader workers; 
+  seed:          42     
+  deterministic: false   
 # wandb
 wandb:
   project: vjepa2-x-lora
-  entity: null
+  entity:  null          # set to your wandb username if needed
